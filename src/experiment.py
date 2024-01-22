@@ -1,9 +1,10 @@
 import torch
 import numpy as np
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 import pandas as pd
+from typing import Dict
 
 from .utils import joinmakedir
 from .summary import summarize_episode, summarize_all_episodes
@@ -29,7 +30,7 @@ class MultiEpisodeResult:
 
 @dataclass
 class MultiEpisodeResult:
-    episodeResults : list
+    episode_results : list
 
 class Criteriorator(ABC):
     @abstractmethod
@@ -93,8 +94,8 @@ def split_indeces(indeces, frac_train, frac_val):
 def split_dataset_indeces(dset, frac_train, frac_val):
     y = dset.y
 
-    true_indeces = torch.argwhere(y)
-    false_indeces = torch.argwhere(torch.logical_not(y))
+    true_indeces = torch.argwhere(y)[:,0]
+    false_indeces = torch.argwhere(torch.logical_not(y))[:,0]
 
     true_train, true_val, true_test = \
         split_indeces(true_indeces, frac_train, frac_val)
@@ -149,16 +150,19 @@ class ExperimentDataLoader:
 
         return StopIteration
 
-def basic_data_splitter(dset):
+def basic_data_splitter(dset, is_oneshot = False):
     train_indeces, val_indeces, test_indeces = \
         split_dataset_indeces(dset, 0.33, 0.33)
     return \
         ExperimentDataLoader(
-            dset, train_indeces, batch_size = 32, is_shuffle = True), \
+            dset, train_indeces, batch_size = 128, is_shuffle = True, \
+            is_oneshot = is_oneshot), \
         ExperimentDataLoader(
-            dset, val_indeces, batch_size = 32, is_shuffle = False), \
+            dset, val_indeces, batch_size = 128, is_shuffle = False, \
+            is_oneshot = is_oneshot), \
         ExperimentDataLoader(
-            dset, test_indeces, batch_size = 32, is_shuffle = False)
+            dset, test_indeces, batch_size = 128, is_shuffle = False, \
+            is_oneshot = is_oneshot)
 
 def _single_run_dset(loader, model, optim, criteriorator, device, is_train,
                      return_outputs= False):
@@ -184,7 +188,7 @@ def _single_run_dset(loader, model, optim, criteriorator, device, is_train,
 
     crit = criteriorator.gen_criteria(all_yh, all_y)
     if(return_outputs):
-        return crit, all_yh, all_y
+        return crit, all_y, all_yh
     return crit
 
 def _single_epoch(train_loader, val_loader,
@@ -205,7 +209,9 @@ def _get_model_data_result(loader, model, criteriorator, device):
         loader, model, optim = None, criteriorator = criteriorator,
         device = device,
         is_train = False, return_outputs = True)
-    return ModelDataResult(criteria = crit, y = y, yh = yh)
+    return ModelDataResult(criteria = crit,
+                           y = np.squeeze(y.detach().numpy()),
+                           yh = np.squeeze(yh.detach().numpy()))
 
 def _perform_episode(
         summary_dir,
@@ -274,4 +280,31 @@ def _perform_multiple_episodes(
             optim_args = optim_args,
             criteriorator = criteriorator,
             logger = None, device = device))
-    summarize_all_episodes(summary_dir, episode_results)
+    multi_ep_result = MultiEpisodeResult(episode_results)
+    summarize_all_episodes(summary_dir, multi_ep_result)
+    return multi_ep_result
+
+@dataclass
+class ExperimentConfiguration:
+    name : str,
+    model_creator_func : callable
+    dataset : torch.utils.data.Dataset
+    optim_class : torch.optim.Optimizer = torch.optim.Adam
+    optim_args : Dict = field(default_factory = lambda : {'lr' : 0.001})
+    criteriorator : Criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), 100)
+    device : str = 'cpu'
+    n_episodes : int = 5
+
+def run_configurations(summary_dir, conf_list):
+    conf_res = [_perform_multiple_episodes(
+        summary_dir = os.path.join(summary_dir, c.name),
+        model_creator_func = c.model_creator_func,
+        dataset = c.dataset,
+        data_splitter = c.data_splitter,
+        optim_class = c.optim_class,
+        optim_args = c.optim_args,
+        criteriorator = c.criteriorator,
+        device = c.device,
+        n_episodes = c.n_episodes)
+                for c in conf_list]
+    summarize_all_configurations(summary_dir, conf_res)
