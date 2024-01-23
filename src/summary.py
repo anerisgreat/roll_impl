@@ -35,11 +35,12 @@ class CombinedRocResult:
             tpr_interp, q = [0, 25, 50, 75, 100],
             axis = 0)
 
-        self.tpr_mean = np.mean(tpr_interp, axis = 0)
+        # self.tpr_mean = np.mean(tpr_interp, axis = 0)
         self.tpr_min = self.tpr_percentiles[0]
-        self.tpr_max = self.tpr_percentiles[4]
         self.tpr_25 = self.tpr_percentiles[1]
+        self.tpr_mean = self.tpr_percentiles[2]
         self.tpr_75 = self.tpr_percentiles[3]
+        self.tpr_max = self.tpr_percentiles[4]
 
         self.num_episodes = tpr_interp.shape[0]
 
@@ -128,12 +129,24 @@ def _gen_roc_to_file(fname, multi_ep_results, names,
                     x = np.concatenate((roc.fpr, roc.fpr[::-1])),
                     y = np.concatenate((roc.tpr_75, roc.tpr_25[::-1])),
                     fill = 'toself',
-                    fillcolor = _color_str_change_opacity(c, 0.2),
+                    fillcolor = _color_str_change_opacity(c, 0.1),
                     mode = 'lines',
                     line = dict(color = 'rgba(0,0,0,0)'),
                     hoverinfo = 'skip',
                     legendgroup = roc_name,
                     showlegend = False))
+            fig.add_trace(
+                go.Scatter(
+                    x = np.concatenate((roc.fpr, roc.fpr[::-1])),
+                    y = np.concatenate((roc.tpr_max, roc.tpr_min[::-1])),
+                    fill = 'toself',
+                    fillcolor = _color_str_change_opacity(c, 0.1),
+                    mode = 'lines',
+                    line = dict(color = 'rgba(0,0,0,0)'),
+                    hoverinfo = 'skip',
+                    legendgroup = roc_name,
+                    showlegend = False))
+
         fig.update_layout(showlegend = True)
         fig.update_traces(
             visible = 'legendonly',
@@ -151,13 +164,13 @@ def summarize_all_episodes(summary_dir, episode_results):
         names = ['model'],
         disabled_modes = ['Train'])
 
-def summarize_all_configurations(summary_dir, multi_ep_results):
+def summarize_all_configurations(summary_dir, multi_ep_results, names):
     #train, val, test
     _gen_roc_to_file(
         fname=os.path.join(summary_dir, 'graph.html'),
         multi_ep_results = multi_ep_results,
         #TODO names from nowhere, restructure
-        names = ['fpr0.4', 'fpr0.2', 'bce'],
+        names = names,
         disabled_modes = ['Train', 'Validation'])
 
 

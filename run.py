@@ -15,7 +15,7 @@ class MyNet(nn.Module):
         super().__init__()
         layers = [
             x for y in [
-                [nn.Linear(10, 10), nn.ReLU()] for _ in range(1)]
+                [nn.Linear(10, 10), nn.ReLU()] for _ in range(3)]
             for x in y]
         self._layers = nn.Sequential(
             *layers, nn.Linear(10, 1))
@@ -63,44 +63,29 @@ configurations = [
         data_splitter = basic_data_splitter,
         optim_class = torch.optim.Adam,
         optim_args = {'lr' : 0.001},
-        criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), 100),
+        criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), 10),
         device = device,
         n_episodes = 5),
     ExperimentConfiguration(
-        name = 'roll-0.04',
+        name = 'roll-0.1',
         model_creator_func = MyNet,
         dataset = dataset,
         data_splitter = oneshot_datasplitter,
         optim_class = torch.optim.SGD,
-        optim_args = {'lr' : 0.001},
-        criteriorator = BasicCriteriorator(roll_loss_from_fpr(0.04), 100),
+        optim_args = {'lr' : 0.01},
+        criteriorator = BasicCriteriorator(roll_loss_from_fpr(0.1), 100),
         device = device,
         n_episodes = 5),
     ExperimentConfiguration(
-        name = 'roll-0.02',
+        name = 'roll-0.05',
         model_creator_func = MyNet,
         dataset = dataset,
         data_splitter = oneshot_datasplitter,
         optim_class = torch.optim.SGD,
-        optim_args = {'lr' : 0.001},
-        criteriorator = BasicCriteriorator(roll_loss_from_fpr(0.02), 100),
+        optim_args = {'lr' : 0.01},
+        criteriorator = BasicCriteriorator(roll_loss_from_fpr(0.05), 100),
         device = device,
         n_episodes = 5),
     ]
 
-res_c = _perform_multiple_episodes(
-    summary_dir = summary_dir,
-    model_creator_func = model_creator_func,
-    dataset = dataset,
-    data_splitter = basic_data_splitter,
-    optim_class = torch.optim.Adam,
-    optim_args = {'lr' : 0.001},
-    criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), 100),
-    device = device,
-    n_episodes = 5)
-
-_gen_roc_to_file(
-    fname='./graph.html',
-    multi_ep_results = [res_a, res_b, res_c],
-    names = ['fpr0.4', 'fpr0.2', 'bce'],
-    disabled_modes = ['Train', 'Validation'])
+run_configurations('tmp/', configurations)

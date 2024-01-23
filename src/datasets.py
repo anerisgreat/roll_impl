@@ -1,7 +1,7 @@
 import scipy
 import torch
 import numpy as np
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, PowerTransformer
 class ForestCoverDataset:
     def __init__(self):
         PATH = '/home/aner/.data/forestcover/cover.mat'
@@ -12,7 +12,7 @@ class ForestCoverDataset:
         y = mat['y']
 
         self.x = \
-            torch.tensor(StandardScaler().fit_transform(x),
+            torch.tensor(PowerTransformer().fit_transform(x),
                          dtype = torch.float32)
         self.y = torch.tensor(y, dtype = torch.float32)
 

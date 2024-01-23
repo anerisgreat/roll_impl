@@ -5,9 +5,10 @@ from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 import pandas as pd
 from typing import Dict
+import os
 
 from .utils import joinmakedir
-from .summary import summarize_episode, summarize_all_episodes
+from .summary import summarize_episode, summarize_all_episodes, summarize_all_configurations
 
 @dataclass
 class ModelDataResult:
@@ -286,13 +287,14 @@ def _perform_multiple_episodes(
 
 @dataclass
 class ExperimentConfiguration:
-    name : str,
+    name : str
     model_creator_func : callable
     dataset : torch.utils.data.Dataset
     optim_class : torch.optim.Optimizer = torch.optim.Adam
     optim_args : Dict = field(default_factory = lambda : {'lr' : 0.001})
     criteriorator : Criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), 100)
     device : str = 'cpu'
+    data_splitter : callable = basic_data_splitter
     n_episodes : int = 5
 
 def run_configurations(summary_dir, conf_list):
@@ -307,4 +309,5 @@ def run_configurations(summary_dir, conf_list):
         device = c.device,
         n_episodes = c.n_episodes)
                 for c in conf_list]
-    summarize_all_configurations(summary_dir, conf_res)
+    names = [c.name for c in conf_list]
+    summarize_all_configurations(summary_dir, conf_res, names)
