@@ -25,6 +25,8 @@ class EpisodeResult:
     train_criteria_epochs : pd.DataFrame
     val_criteria_epochs : pd.DataFrame
 
+    best_model : torch.nn.Module
+
 @dataclass
 class MultiEpisodeResult:
     episode_reults : list
@@ -216,20 +218,19 @@ def _get_model_data_result(loader, model, criteriorator, device):
 
 def _perform_episode(
         summary_dir,
-        model_creator_func,
         train_loader, val_loader, test_loader,
-        optim_class, optim_args, criteriorator, logger,
-        device):
+        logger, device, config):
 
     train_losses = []
     val_losses = []
 
-    model = model_creator_func()
-    optim = optim_class(model.parameters(), **optim_args)
+    model = config.model_creator_func()
+    optim = config.optim_class(model.parameters(), **config.optim_args)
     epoch_num = 0
 
     run_flag = True
     best_model = deepcopy(model)
+    criteriorator = deepcopy(config.criteriorator)
     criteriorator.init_episode()
     train_crits = []
     val_crits = []
@@ -257,57 +258,47 @@ def _perform_episode(
         val_result = val_result,
         test_result = test_result,
         train_criteria_epochs = train_crits,
-        val_criteria_epochs = val_crits)
+        val_criteria_epochs = val_crits,
+        best_model = best_model)
 
-    summarize_episode(summary_dir, best_model, ep_res)
+    summarize_episode(summary_dir, ep_res, config)
 
     return ep_res
 
 def _perform_multiple_episodes(
-        summary_dir, model_creator_func,
-        dataset, data_splitter,
-        optim_class, optim_args, criteriorator,
-        device, n_episodes):
+        summary_dir, dataset, device, config):
     episode_results = []
-    for episode_index in range(n_episodes):
-        train_loader, val_loader, test_loader = data_splitter(dataset)
+    for episode_index in range(config.n_episodes):
+        train_loader, val_loader, test_loader = config.data_splitter(dataset)
         episode_results.append(_perform_episode(
             summary_dir = joinmakedir(summary_dir, f'{episode_index}'),
-            model_creator_func = model_creator_func,
             train_loader = train_loader,
             val_loader = val_loader,
             test_loader = test_loader,
-            optim_class = optim_class,
-            optim_args = optim_args,
-            criteriorator = criteriorator,
-            logger = None, device = device))
+            logger = None, device = device,
+            config = config))
     multi_ep_result = MultiEpisodeResult(episode_results)
-    summarize_all_episodes(summary_dir, multi_ep_result)
+    summarize_all_episodes(summary_dir, multi_ep_result, config)
     return multi_ep_result
 
 @dataclass
 class ExperimentConfiguration:
     name : str
     model_creator_func : callable
-    dataset : torch.utils.data.Dataset
     optim_class : torch.optim.Optimizer = torch.optim.Adam
     optim_args : Dict = field(default_factory = lambda : {'lr' : 0.001})
-    criteriorator : Criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), 100)
-    device : str = 'cpu'
+    criteriorator : Criteriorator = BasicCriteriorator(
+        torch.nn.BCEWithLogitsLoss(), 100)
     data_splitter : callable = basic_data_splitter
     n_episodes : int = 5
 
-def run_configurations(summary_dir, conf_list):
-    conf_res = [_perform_multiple_episodes(
-        summary_dir = os.path.join(summary_dir, c.name),
-        model_creator_func = c.model_creator_func,
-        dataset = c.dataset,
-        data_splitter = c.data_splitter,
-        optim_class = c.optim_class,
-        optim_args = c.optim_args,
-        criteriorator = c.criteriorator,
-        device = c.device,
-        n_episodes = c.n_episodes)
-                for c in conf_list]
+def run_configurations(summary_dir, conf_list, dataset, device = 'cpu'):
+    conf_res = \
+        [_perform_multiple_episodes(
+            summary_dir = os.path.join(summary_dir, c.name),
+            dataset = dataset,
+            device = device,
+            config = c) \
+            for c in conf_list]
     names = [c.name for c in conf_list]
-    summarize_all_configurations(summary_dir, conf_res, names)
+    summarize_all_configurations(summary_dir, conf_res, conf_list)

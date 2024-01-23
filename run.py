@@ -56,36 +56,31 @@ dataset = ForestCoverDataset()
 oneshot_datasplitter = partial(basic_data_splitter, is_oneshot = True)
 
 configurations = [
-    ExperimentConfiguration(
-        name = 'BCE',
-        model_creator_func = MyNet,
-        dataset = dataset,
-        data_splitter = basic_data_splitter,
-        optim_class = torch.optim.Adam,
-        optim_args = {'lr' : 0.001},
-        criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), 10),
-        device = device,
-        n_episodes = 5),
+    # ExperimentConfiguration(
+    #     name = 'BCE',
+    #     model_creator_func = MyNet,
+    #     data_splitter = basic_data_splitter,
+    #     optim_class = torch.optim.Adam,
+    #     optim_args = {'lr' : 0.001},
+    #     criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), 10),
+    #     device = device,
+    #     n_episodes = 5),
     ExperimentConfiguration(
         name = 'roll-0.1',
         model_creator_func = MyNet,
-        dataset = dataset,
         data_splitter = oneshot_datasplitter,
         optim_class = torch.optim.SGD,
         optim_args = {'lr' : 0.01},
-        criteriorator = BasicCriteriorator(roll_loss_from_fpr(0.1), 100),
-        device = device,
+        criteriorator = BasicCriteriorator(roll_loss_from_fpr(0.1), 10),
         n_episodes = 5),
     ExperimentConfiguration(
         name = 'roll-0.05',
         model_creator_func = MyNet,
-        dataset = dataset,
         data_splitter = oneshot_datasplitter,
         optim_class = torch.optim.SGD,
         optim_args = {'lr' : 0.01},
-        criteriorator = BasicCriteriorator(roll_loss_from_fpr(0.05), 100),
-        device = device,
+        criteriorator = BasicCriteriorator(roll_loss_from_fpr(0.05), 10),
         n_episodes = 5),
     ]
 
-run_configurations('tmp/', configurations)
+run_configurations('tmp/', configurations, dataset)

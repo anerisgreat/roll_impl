@@ -8,7 +8,7 @@ import plotly
 import plotly.graph_objects as go
 import plotly.express as px
 
-def summarize_episode(summary_dir, best_model, ep_res):
+def summarize_episode(summary_dir, ep_res, config):
     pass
     #raise NotImplementedError()
 
@@ -156,24 +156,19 @@ def _gen_roc_to_file(fname, multi_ep_results, names,
                 for d in disabled_modes))
         fig.write_html(fname)
 
-def summarize_all_episodes(summary_dir, episode_results):
+def summarize_all_episodes(summary_dir, episode_results, config):
     #train, val, test
     _gen_roc_to_file(
         fname = os.path.join(summary_dir, 'graph.html'),
         multi_ep_results = [episode_results],
-        names = ['model'],
+        names = [config.name],
         disabled_modes = ['Train'])
 
-def summarize_all_configurations(summary_dir, multi_ep_results, names):
+def summarize_all_configurations(summary_dir, multi_ep_results, configs):
     #train, val, test
     _gen_roc_to_file(
         fname=os.path.join(summary_dir, 'graph.html'),
         multi_ep_results = multi_ep_results,
-        #TODO names from nowhere, restructure
-        names = names,
+        names = [c.name for c in configs],
         disabled_modes = ['Train', 'Validation'])
-
-
-
-
 
