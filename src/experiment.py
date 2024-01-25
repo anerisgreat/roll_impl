@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 import pandas as pd
 from typing import Dict
-import os
+import logging
 
 from .utils import joinmakedir
 from .summary import summarize_episode, summarize_all_episodes, summarize_all_configurations
@@ -295,7 +295,7 @@ class ExperimentConfiguration:
 def run_configurations(summary_dir, conf_list, dataset, device = 'cpu'):
     conf_res = \
         [_perform_multiple_episodes(
-            summary_dir = os.path.join(summary_dir, c.name),
+            summary_dir = joinmakedir(summary_dir, c.name),
             dataset = dataset,
             device = device,
             config = c) \

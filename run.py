@@ -3,12 +3,14 @@ from functools import partial
 from torch import nn
 
 from torchvision import datasets, transforms
+import logging
 
-from src.experiment import _perform_multiple_episodes
-from src.experiment import *
-
+from src.experiment import run_configurations, basic_data_splitter, \
+    BasicCriteriorator, ExperimentConfiguration
 from src.datasets import ForestCoverDataset
-from src.summary import _gen_roc_to_file
+from src.utils import init_experiment
+
+run_dir = init_experiment('tmp', 'test_experiment')
 
 class MyNet(nn.Module):
     def __init__(self):
@@ -55,6 +57,8 @@ dataset = ForestCoverDataset()
 
 oneshot_datasplitter = partial(basic_data_splitter, is_oneshot = True)
 
+logging.debug('Just before starting!')
+
 configurations = [
     # ExperimentConfiguration(
     #     name = 'BCE',
@@ -83,4 +87,6 @@ configurations = [
         n_episodes = 5),
     ]
 
-run_configurations('tmp/', configurations, dataset)
+logging.info('Starting experiment!')
+
+run_configurations(run_dir, configurations, dataset)
