@@ -15,12 +15,13 @@ def logging_get_default_config(
         "version":1,
         "root":{
             "handlers" : ["console"],
-            "level": logging.getLevelName(console_level)
+            "level" : logging.DEBUG
         },
         "handlers":{
             "console":{
                 "formatter": "stdout",
                 "class": "logging.StreamHandler",
+                "level": console_level
             },
         },
         "formatters":{
@@ -46,10 +47,10 @@ def logging_get_default_config(
              "class" : "logging.FileHandler",
              "formatter" : "debug",
              "filename" : debug_fname,
-             "level" : "DEBUG"}
+             "level" : logging.DEBUG}
         return base_dict
 
-def init_experiment(base_dir, experiment_name, debug_flag = True):
+def init_experiment(base_dir, experiment_name):
     experiment_dir = joinmakedir(base_dir, experiment_name)
     run_dir = joinmakedir(
         experiment_dir,

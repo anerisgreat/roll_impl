@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 import pandas as pd
 from typing import Dict
 import logging
+from sklearn.metrics import roc_curve
 
 from .utils import joinmakedir
 from .summary import summarize_episode, summarize_all_episodes, summarize_all_configurations
@@ -38,15 +39,20 @@ class MultiEpisodeResult:
 class Criteriorator(ABC):
     @abstractmethod
     def init_episode(self):
-        return NotImplemented
+        raise NotImplemented
 
     @abstractmethod
     def get_stop_best_flags(self, train_crit, val_crit):
-        return NotImplemented
+        raise NotImplemented
+
+    def gen_criteria(self, yh, y):
+        ret = self._gen_criteria_func(yh, y)
+        logging.debug(''.join([f'{c}: {ret[c][0]}' for c in ret.columns]))
+        return ret
 
     @abstractmethod
-    def gen_criteria(self, yh, y):
-        return NotImplemented
+    def _gen_criteria_func(self, yh, y):
+        raise NotImplemented
 
     @property
     @abstractmethod
@@ -71,9 +77,48 @@ class BasicCriteriorator(Criteriorator):
             loss = np.mean(loss)
         return loss
 
-    def gen_criteria(self, yh, y):
+    def _gen_criteria_func(self, yh, y):
         loss = self._get_loss(yh, y)
         return pd.DataFrame({'loss' : [loss]})
+
+    def get_stop_best_flags(self, train_crit, val_crit):
+        self._n_iters += 1
+
+        newloss = val_crit.at[0, 'loss']
+        best_flag = newloss < self._best_loss
+        if(best_flag):
+            self._best_loss = newloss
+        stop_flag = self._n_iters >= self._max_iters
+
+        return stop_flag, best_flag
+
+class CRBasedCriteriorator(Criteriorator):
+    def __init__(self, loss_func, max_iters, fprs):
+        self._loss_func = loss_func
+        self._max_iters = max_iters
+        self._fprs = fprs
+
+    def init_episode(self):
+        self._n_iters = 0
+        self._best_loss = np.infty
+        self._best_crs = [0 for _ in self._fprs]
+
+    def loss_func(self, yh, y):
+        return self._loss_func(yh, y)
+
+    def _get_loss(self, yh, y):
+        loss = self._loss_func(yh, y).detach().numpy()
+        if(isinstance(loss, np.ndarray)):
+            loss = np.mean(loss)
+        return loss
+
+    def _gen_criteria_func(self, yh, y):
+        loss = self._get_loss(yh, y)
+        ret = {'loss' : [loss]}
+        #TODO HERE
+        # tprs = get_tpr_at_fprs(yh, y, fprs)
+        tprs = get_tpr_at_fprs(yh, y, fprs)
+        return pd.DataFrame()
 
     def get_stop_best_flags(self, train_crit, val_crit):
         self._n_iters += 1
@@ -109,6 +154,19 @@ def split_dataset_indeces(dset, frac_train, frac_val):
         torch.cat((false_train, true_train)), \
         torch.cat((false_val, true_val)), \
         torch.cat((false_test, true_test))
+
+def _get_tpr_at_fpr_internal(fpr, roc_fprs, roc_tprs):
+    ind = np.searchsorted(roc_fprs, fpr, side = 'right')
+    return roc_tprs[ind]
+
+def get_tpr_at_fprs(yh, y, fprs):
+    fprs, tprs, _ = zip(*[roc_curve(y > 0., yh) \
+                                        for y, yh in zip(y_list, yh_list)])
+    return [_get_tpr_at_fpr_internal(fpr, roc_roc_fprs, roc_tprs) \
+            for fpr in fprs]
+
+def get_tpr_at_fpr(yh, y, fpr):
+    return get_tpr_at_fprs(yh, y, [fpr])[0]
 
 class ExperimentDataLoader:
     def __init__(
@@ -225,7 +283,7 @@ def _perform_episode(
     val_losses = []
 
     model = config.model_creator_func()
-    optim = config.optim_class(model.parameters(), **config.optim_args)
+    optim = config.optim_class(params = model.parameters(), **config.optim_args)
     epoch_num = 0
 
     run_flag = True
@@ -269,6 +327,7 @@ def _perform_multiple_episodes(
         summary_dir, dataset, device, config):
     episode_results = []
     for episode_index in range(config.n_episodes):
+        logging.info(f'{episode_index:3d} - {config.name}')
         train_loader, val_loader, test_loader = config.data_splitter(dataset)
         episode_results.append(_perform_episode(
             summary_dir = joinmakedir(summary_dir, f'{episode_index}'),
@@ -293,6 +352,7 @@ class ExperimentConfiguration:
     n_episodes : int = 5
 
 def run_configurations(summary_dir, conf_list, dataset, device = 'cpu'):
+    logging.info('Starting running configurations!')
     conf_res = \
         [_perform_multiple_episodes(
             summary_dir = joinmakedir(summary_dir, c.name),
