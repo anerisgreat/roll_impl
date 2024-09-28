@@ -45,22 +45,10 @@ class CombinedRocResult:
         self.num_episodes = tpr_interp.shape[0]
 
 def _get_roc_curves_from_episode(res):
-    train_roc = CombinedRocResult(*zip(*[
-        (ep_res.train_result.y, ep_res.train_result.yh) \
-        for ep_res in res.episode_results]))
+    all_split_scores = res.get_split_scores()
 
-    val_roc = CombinedRocResult(*zip(*[
-        (ep_res.val_result.y, ep_res.val_result.yh) \
-        for ep_res in res.episode_results]))
-
-    test_roc = CombinedRocResult(*zip(*[
-        (ep_res.test_result.y, ep_res.test_result.yh) \
-        for ep_res in res.episode_results]))
-
-    return \
-        train_roc, \
-        val_roc, \
-        test_roc
+    return {name: CombinedRocResult(*score_tuple) \
+                for name, score_tuple in all_split_scores.items()}
 
 def _color_hex_str_to_rgb(s):
     return [int(s[i:i+2], 16) for i in range(1, len(s), 2)]
@@ -114,8 +102,9 @@ def _gen_roc_to_file(fname, multi_ep_results, names,
             base_color, \
             _color_str_change_brightness(base_color, 0.3),
             _color_str_change_brightness(base_color, -0.3)]
-        for roc, res_name, c in zip(
-                rocs, ['Train', 'Validation', 'Test'], colors):
+        colors_iter = iter(colors)
+        for res_name, roc in rocs.items():
+            c = next(colors_iter)
             roc_name = f'{name}-{res_name}'
             fig.add_trace(go.Scatter(
                 x = roc.fpr,

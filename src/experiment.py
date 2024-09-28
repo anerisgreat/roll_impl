@@ -4,7 +4,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 import pandas as pd
-from typing import Dict
+from typing import Dict, Any
 import logging
 from sklearn.metrics import roc_curve
 
@@ -19,14 +19,9 @@ class ModelDataResult:
 
 @dataclass
 class EpisodeResult:
-    train_result : ModelDataResult
-    val_result : ModelDataResult
-    test_result : ModelDataResult
-
-    train_criteria_epochs : pd.DataFrame
-    val_criteria_epochs : pd.DataFrame
-
     best_model : torch.nn.Module
+    split_results : Dict[str, ModelDataResult] = field(default_factory = {})
+    split_criteria_epochs : Dict[str, pd.DataFrame] = field(default_factory = {})
 
 @dataclass
 class MultiEpisodeResult:
@@ -35,6 +30,13 @@ class MultiEpisodeResult:
 @dataclass
 class MultiEpisodeResult:
     episode_results : list
+
+    def get_split_scores(self):
+        split_names = self.episode_results[0].split_results.keys()
+        return {split_name : tuple(zip(*[
+                    (ep_res.split_results[split_name].y, ep_res.split_results[split_name].yh) \
+                    for ep_res in self.episode_results])) \
+                            for split_name in split_names}
 
 class Criteriorator(ABC):
     @abstractmethod
@@ -279,6 +281,10 @@ def _perform_episode(
         train_loader, val_loader, test_loader,
         logger, device, config):
 
+    data_loaders = {
+        'train' : train_loader,
+        'val' : val_loader,
+        'test' : test_loader}
     train_losses = []
     val_losses = []
 
@@ -304,19 +310,13 @@ def _perform_episode(
 
     train_crits = pd.concat(train_crits)
     val_crits = pd.concat(val_crits)
-    train_result = _get_model_data_result(
-        train_loader, best_model, criteriorator, device)
-    val_result = _get_model_data_result(
-        val_loader, best_model, criteriorator, device)
-    test_result = _get_model_data_result(
-        test_loader, best_model, criteriorator, device)
+    results = {
+        name: _get_model_data_result(loader, best_model, criteriorator, device) \
+        for name, loader in data_loaders.items()}
 
     ep_res = EpisodeResult(
-        train_result = train_result,
-        val_result = val_result,
-        test_result = test_result,
-        train_criteria_epochs = train_crits,
-        val_criteria_epochs = val_crits,
+        split_results = results,
+        split_criteria_epochs = {'train' : train_crits, 'val' : val_crits},
         best_model = best_model)
 
     summarize_episode(summary_dir, ep_res, config)
