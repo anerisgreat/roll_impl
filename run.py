@@ -4,7 +4,6 @@ from torch import nn
 
 from torchvision import datasets, transforms
 import logging
-
 from src.experiment import run_configurations, basic_data_splitter, \
     BasicCriteriorator, ExperimentConfiguration
 from src.datasets import ForestCoverDataset, Cifar10Dataset
@@ -83,15 +82,15 @@ configurations = [
         optim_args = {'lr' : 0.001},
         criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), 10),
         # device = device,
-        n_episodes = 1),
-    # ExperimentConfiguration(
-    #     name = 'roll-0.5',
-    #     model_creator_func = BasicConvNet,
-    #     data_splitter = oneshot_datasplitter,
-    #     optim_class = torch.optim.SGD,
-    #     optim_args = {'lr' : 0.01},
-    #     criteriorator = BasicCriteriorator(roll_loss_from_fpr(0.5), 300),
-    #     n_episodes = 5),
+        n_episodes = 5),
+    ExperimentConfiguration(
+        name = 'roll-0.5',
+        model_creator_func = BasicConvNet,
+        data_splitter = oneshot_datasplitter,
+        optim_class = torch.optim.SGD,
+        optim_args = {'lr' : 0.01},
+        criteriorator = BasicCriteriorator(roll_loss_from_fpr(0.5), 300),
+        n_episodes = 5),
     # ExperimentConfiguration(
     #     name = 'roll-0.8',
     #     model_creator_func = BasicConvNet,

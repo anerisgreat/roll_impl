@@ -360,5 +360,4 @@ def run_configurations(summary_dir, conf_list, dataset, device = 'cpu'):
             device = device,
             config = c) \
             for c in conf_list]
-    names = [c.name for c in conf_list]
     summarize_all_configurations(summary_dir, conf_res, conf_list)
