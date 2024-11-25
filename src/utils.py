@@ -2,6 +2,7 @@ import os
 from logging import config as loggingconfig
 import logging
 import datetime
+from functools import partial
 
 def joinmakedir(a, b):
     newp = os.path.join(a, b)

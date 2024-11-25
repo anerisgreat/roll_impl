@@ -3,14 +3,54 @@ from dataclasses import dataclass
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+import pandas as pd
 
 import plotly
 import plotly.graph_objects as go
 import plotly.express as px
 
+from .utils import joinmakedir
+import pickle
+
+def np_split_true_false(yh, y):
+    true_indeces = np.argwhere(y)
+    false_indeces = np.argwhere(np.logical_not(y))
+
+    true_yh = yh[true_indeces]
+    false_yh = yh[false_indeces]
+
+    return true_yh.squeeze(), false_yh.squeeze()
+
+
 def summarize_episode(summary_dir, ep_res, config):
-    pass
-    #raise NotImplementedError()
+    criteria_dir = joinmakedir(summary_dir, 'criteria')
+    #Summarize criteria
+    for split, split_epochs in ep_res.split_criteria_epochs.items():
+        fig = go.Figure()
+        for c in split_epochs.columns:
+            fig.add_traces(go.Scatter(
+                x = split_epochs.index,
+                y = split_epochs[c],
+                mode = 'lines',
+                name = c,
+                legendgroup = c
+            ))
+        fig.update_layout(showlegend = True)
+        fig.write_html(os.path.join(criteria_dir, f'{split}.html'))
+
+    #Summarize scores
+    for split, result in ep_res.split_results.items():
+        with open(os.path.join(summary_dir, f'{split}-res.pkl'), 'wb') as ofile:
+            pickle.dump(ep_res, ofile)
+
+        #Score distrib graph
+        true_yh, false_yh = np_split_true_false(result.yh, result.y)
+        true_df = pd.DataFrame({'label' : 'True', 'score' : true_yh})
+        false_df = pd.DataFrame({'label' : 'False', 'score' : false_yh})
+
+        all_df = pd.concat((true_df, false_df), ignore_index = True)
+        fig = px.ecdf(all_df, x = 'score', color = 'label')
+        fig.write_html(os.path.join(summary_dir, f'{split}-scores.html'))
 
 @dataclass
 class CombinedRocResult:
@@ -140,8 +180,8 @@ def _gen_roc_to_file(fname, multi_ep_results, names,
         fig.update_traces(
             visible = 'legendonly',
             selector = lambda x: \
-                any((not x.name is None and d in x.name) or \
-                (not x.legendgroup is None and d in x.legendgroup) \
+                any((not x.name is None and d.lower() in x.name.lower()) or \
+                (not x.legendgroup is None and d.lower() in x.legendgroup.lower()) \
                 for d in disabled_modes))
         fig.write_html(fname)
 
@@ -159,5 +199,5 @@ def summarize_all_configurations(summary_dir, multi_ep_results, configs):
         fname=os.path.join(summary_dir, 'graph.html'),
         multi_ep_results = multi_ep_results,
         names = [c.name for c in configs],
-        disabled_modes = ['Train', 'Validation'])
+        disabled_modes = ['Train', 'Val'])
 

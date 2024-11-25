@@ -7,9 +7,14 @@ import pandas as pd
 from typing import Dict, Any
 import logging
 from sklearn.metrics import roc_curve
+from functools import partial
+import multiprocessing as mp
+import time
 
 from .utils import joinmakedir
 from .summary import summarize_episode, summarize_all_episodes, summarize_all_configurations
+
+N_MP_WORKERS = 4
 
 @dataclass
 class ModelDataResult:
@@ -119,8 +124,12 @@ class CRBasedCriteriorator(Criteriorator):
         ret = {'loss' : [loss]}
         #TODO HERE
         # tprs = get_tpr_at_fprs(yh, y, fprs)
-        tprs = get_tpr_at_fprs(yh, y, fprs)
-        return pd.DataFrame()
+        tprs = dict(zip([f'tpr@{fpr:0.2f}' for fpr in self._fprs],
+                        get_tpr_at_fprs(yh, y, self._fprs)))
+        tfrs = dict(zip([f'tfr@{fpr:0.2f}' for fpr in self._fprs],
+                        [1 - x for x in get_tpr_at_fprs(yh, y, self._fprs)]))
+
+        return pd.DataFrame({**ret, **tprs, **tfrs})
 
     def get_stop_best_flags(self, train_crit, val_crit):
         self._n_iters += 1
@@ -158,14 +167,27 @@ def split_dataset_indeces(dset, frac_train, frac_val):
         torch.cat((false_test, true_test))
 
 def _get_tpr_at_fpr_internal(fpr, roc_fprs, roc_tprs):
-    ind = np.searchsorted(roc_fprs, fpr, side = 'right')
+    ind = np.searchsorted(roc_fprs, fpr, side = 'left')
     return roc_tprs[ind]
 
 def get_tpr_at_fprs(yh, y, fprs):
-    fprs, tprs, _ = zip(*[roc_curve(y > 0., yh) \
-                                        for y, yh in zip(y_list, yh_list)])
-    return [_get_tpr_at_fpr_internal(fpr, roc_roc_fprs, roc_tprs) \
-            for fpr in fprs]
+    yh = np.squeeze(yh.detach().numpy())
+    y = np.squeeze((y > 0.).detach().numpy())
+
+    yh_false = yh[np.argwhere(y == 0)]
+    yh_true = yh[np.argwhere(y > 0)]
+    yh_false_sorted = np.sort(yh_false, axis = None)
+
+    ret = []
+    for fpr in fprs:
+        thresh = yh_false_sorted[int(len(yh_false_sorted) * (1 - fpr))]
+        ret.append(np.sum(yh_true >= thresh) / len(yh_true))
+
+    return ret
+
+    # roc_fprs, roc_tprs, _ = roc_curve((y > 0.).detach().numpy(), yh.detach().numpy())
+    # return [_get_tpr_at_fpr_internal(fpr, roc_fprs, roc_tprs) \
+    #         for fpr in fprs]
 
 def get_tpr_at_fpr(yh, y, fpr):
     return get_tpr_at_fprs(yh, y, [fpr])[0]
@@ -213,18 +235,18 @@ class ExperimentDataLoader:
 
         return StopIteration
 
-def basic_data_splitter(dset, is_oneshot = False):
+def basic_data_splitter(dset, is_oneshot = False, batch_size = 128):
     train_indeces, val_indeces, test_indeces = \
         split_dataset_indeces(dset, 0.33, 0.33)
     return \
         ExperimentDataLoader(
-            dset, train_indeces, batch_size = 128, is_shuffle = True, \
+            dset, train_indeces, batch_size = batch_size, is_shuffle = True, \
             is_oneshot = is_oneshot), \
         ExperimentDataLoader(
-            dset, val_indeces, batch_size = 128, is_shuffle = False, \
+            dset, val_indeces, batch_size = batch_size, is_shuffle = False, \
             is_oneshot = is_oneshot), \
         ExperimentDataLoader(
-            dset, test_indeces, batch_size = 128, is_shuffle = False, \
+            dset, test_indeces, batch_size = batch_size, is_shuffle = False, \
             is_oneshot = is_oneshot)
 
 def _single_run_dset(loader, model, optim, criteriorator, device, is_train,
@@ -278,13 +300,9 @@ def _get_model_data_result(loader, model, criteriorator, device):
 
 def _perform_episode(
         summary_dir,
-        train_loader, val_loader, test_loader,
+        data_loaders,
         logger, device, config):
 
-    data_loaders = {
-        'train' : train_loader,
-        'val' : val_loader,
-        'test' : test_loader}
     train_losses = []
     val_losses = []
 
@@ -300,7 +318,8 @@ def _perform_episode(
     val_crits = []
     while(run_flag):
         stop_flag, best_flag, train_crit, val_crit = \
-            _single_epoch(train_loader, val_loader, model,
+            _single_epoch(data_loaders['train'],
+                          data_loaders['val'], model,
                           optim, criteriorator, device)
         train_crits.append(train_crit)
         val_crits.append(val_crit)
@@ -308,8 +327,8 @@ def _perform_episode(
         if(best_flag):
             best_model = deepcopy(model)
 
-    train_crits = pd.concat(train_crits)
-    val_crits = pd.concat(val_crits)
+    train_crits = pd.concat(train_crits, ignore_index = True)
+    val_crits = pd.concat(val_crits, ignore_index = True)
     results = {
         name: _get_model_data_result(loader, best_model, criteriorator, device) \
         for name, loader in data_loaders.items()}
@@ -326,16 +345,30 @@ def _perform_episode(
 def _perform_multiple_episodes(
         summary_dir, dataset, device, config):
     episode_results = []
-    for episode_index in range(config.n_episodes):
-        logging.info(f'{episode_index:3d} - {config.name}')
-        train_loader, val_loader, test_loader = config.data_splitter(dataset)
-        episode_results.append(_perform_episode(
-            summary_dir = joinmakedir(summary_dir, f'{episode_index}'),
-            train_loader = train_loader,
-            val_loader = val_loader,
-            test_loader = test_loader,
-            logger = None, device = device,
-            config = config))
+    def _gen_episodes():
+        for episode_index in range(config.n_episodes):
+            logging.info(f'{episode_index:3d} - {config.name}')
+            train_loader, val_loader, test_loader = config.data_splitter(dataset)
+            yield [
+                joinmakedir(summary_dir, f'{episode_index}'), #summary_dir
+                {'train' : train_loader, 'val' : val_loader, 'test' : test_loader}, #data_loaders
+                None, #logger
+                device, #device
+                config] #config
+
+    episode_results = None
+    if(config.is_mp):
+        with mp.Pool(N_MP_WORKERS) as mppool:
+            result = mppool.starmap_async(
+                _perform_episode, _gen_episodes())
+            while not result.ready():
+                time.sleep(1)
+            episode_results = result.get()
+    else:
+        episode_results = []
+        for episode_params in _gen_episodes():
+            episode_results.append(_perform_episode(*episode_params))
+
     multi_ep_result = MultiEpisodeResult(episode_results)
     summarize_all_episodes(summary_dir, multi_ep_result, config)
     return multi_ep_result
@@ -350,6 +383,7 @@ class ExperimentConfiguration:
         torch.nn.BCEWithLogitsLoss(), 100)
     data_splitter : callable = basic_data_splitter
     n_episodes : int = 5
+    is_mp : bool = False
 
 def run_configurations(summary_dir, conf_list, dataset, device = 'cpu'):
     logging.info('Starting running configurations!')
@@ -361,3 +395,5 @@ def run_configurations(summary_dir, conf_list, dataset, device = 'cpu'):
             config = c) \
             for c in conf_list]
     summarize_all_configurations(summary_dir, conf_res, conf_list)
+
+oneshot_datasplitter = partial(basic_data_splitter, is_oneshot = True)

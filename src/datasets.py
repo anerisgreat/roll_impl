@@ -3,6 +3,9 @@ import torch
 import numpy as np
 from sklearn.preprocessing import StandardScaler, PowerTransformer
 
+#for Adult
+from adult import Adult
+
 import torch
 import torchvision
 import torchvision.transforms as transforms
@@ -46,3 +49,40 @@ class Cifar10Dataset:
 
     def __len__(self):
         return len(self._dset)
+
+class TestGaussianDataset:
+    def __init__(self,
+            loc_false, scale_false, n_false,
+            loc_true, scale_true, n_true):
+        false_s = np.random.normal(loc_false, scale_false,
+                                   np.array([n_false, len(loc_false)]))
+        true_s = np.random.normal(loc_true, scale_true,
+                                  np.array([n_true, len(loc_true)]))
+
+        samps = np.concatenate((false_s, true_s))
+
+        labels = np.concatenate((
+            np.zeros(n_false, dtype = bool),
+            np.ones(n_true, dtype = bool)))
+
+        self.x = torch.tensor(samps, dtype = torch.float32)
+        self.y = torch.tensor(labels, dtype = torch.float32)
+
+    def __getitem__(self, i):
+        return self.x[i], self.y[i]
+
+    def __len__(self):
+        return len(self.x)
+
+class AdultDataset:
+    def __init__(self):
+        self._data = Adult(root = 'datasets', download = True)
+        self.x, self.y = self._data[:]
+        self.y = self.y.float()
+
+    def __getitem__(self, i):
+        retx, rety = self._data[i]
+        return retx, rety.float()
+
+    def __len__(self, i):
+        return len(self._data)
