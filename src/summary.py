@@ -10,7 +10,11 @@ import plotly.graph_objects as go
 import plotly.express as px
 
 from .utils import joinmakedir
+from scipy.stats import gamma, skewnorm, genhyperbolic, norminvgauss, nct, beta, norm
+from scipy.stats import nakagami, rayleigh, gamma, invgamma, weibull_min
 import pickle
+
+from functools import partial
 
 def np_split_true_false(yh, y):
     true_indeces = np.argwhere(y)
@@ -21,6 +25,19 @@ def np_split_true_false(yh, y):
 
     return true_yh.squeeze(), false_yh.squeeze()
 
+def _get_pdf_data_from_dist(data, dist):
+    fit_params = dist.fit(data)
+    ret = dist.isf(np.arange(0.01, 1, 0.01), *fit_params)
+    return ret
+
+def _get_pdf_gamm_from_dist():
+    return partial(_get_pdf_data_from_dist, dist = gamma)
+
+def _get_pdf_skewnorm_from_dist():
+    return partial(_get_pdf_data_from_dist, dist = skewnorm)
+
+def _get_pdf_from_dist(dist):
+    return partial(_get_pdf_data_from_dist, dist = dist)
 
 def summarize_episode(summary_dir, ep_res, config):
     criteria_dir = joinmakedir(summary_dir, 'criteria')
@@ -45,10 +62,36 @@ def summarize_episode(summary_dir, ep_res, config):
 
         #Score distrib graph
         true_yh, false_yh = np_split_true_false(result.yh, result.y)
+        dist_approx_dict = {
+            'beta' : _get_pdf_from_dist(beta),
+            'norm' : _get_pdf_from_dist(norm),
+            'nakagami' : _get_pdf_from_dist(nakagami),
+            # 'boltzmann' : _get_pdf_from_dist(boltzmann),
+            'rayleigh' : _get_pdf_from_dist(rayleigh),
+            'gamma' : _get_pdf_from_dist(gamma),
+            'invgamma' : _get_pdf_from_dist(invgamma),
+            'weibull' : _get_pdf_from_dist(weibull_min),
+            # 'skewnorm' : _get_pdf_from_dist(skewnorm),
+            # 'nct' : _get_pdf_from_dist(nct),
+            }
+        true_dist_approx = {
+            f'f{k}_true_approx' : v(true_yh) \
+            for k, v in dist_approx_dict.items()}
+        false_dist_approx = {
+            f'f{k}_false_approx' : v(false_yh)\
+            for k, v in dist_approx_dict.items()}
+
         true_df = pd.DataFrame({'label' : 'True', 'score' : true_yh})
         false_df = pd.DataFrame({'label' : 'False', 'score' : false_yh})
 
-        all_df = pd.concat((true_df, false_df), ignore_index = True)
+        approx_true_dfs = [pd.DataFrame({'label' : k, 'score' : v }) \
+                                        for k, v in true_dist_approx.items()]
+        approx_false_dfs = [pd.DataFrame({'label' : k, 'score' : v }) \
+                                        for k, v in false_dist_approx.items()]
+
+        all_df = pd.concat((true_df, false_df,
+                            *approx_true_dfs, *approx_false_dfs),
+                           ignore_index = True)
         fig = px.ecdf(all_df, x = 'score', color = 'label')
         fig.write_html(os.path.join(summary_dir, f'{split}-scores.html'))
 

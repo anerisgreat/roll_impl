@@ -33,19 +33,29 @@ class ForestCoverDataset:
 class Cifar10Dataset:
     def __init__(self):
         PATH = '/home/aner/.data/cifar10'
-        transform = transforms.Compose(
+        self._transform = transforms.Compose(
             [transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
         self._dset = torchvision.datasets.CIFAR10(
-            root=PATH, train=True, download=True, transform=transform)
+            root=PATH, train=True, download=True, transform=self._transform)
         self.y = torch.tensor(torch.tensor(self._dset.targets) == 1, dtype = torch.float64)
 
     def __getitem__(self, i):
-        x, _ = list(zip(*[self._dset[j] for j in i])) if len(i.shape) > 0 \
-            else self._dset[i]
-        print(x)
-        return torch.stack(x, 0), self.y[i]
+        x = self._dset.data[i]
+        x = torch.tensor(x / 255, dtype = torch.float32)
+        x = torch.movedim(x, -1, -3)
+        return x, self.y[i]
+
+
+        # if(type(i) == int):
+        #     return self._dset.data[i], self.y[i]
+        # if(len(i.shape) > 0):
+        #     x, __= list(zip(*[self._dset.data[j] for j in i]))
+        #     return torch.stack(x, 0), self.y[i]
+        # else:
+        #     return self._dset.data[i], self.y[i]
+
 
     def __len__(self):
         return len(self._dset)
