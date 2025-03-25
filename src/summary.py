@@ -13,6 +13,7 @@ from .utils import joinmakedir
 from scipy.stats import gamma, skewnorm, genhyperbolic, norminvgauss, nct, beta, norm
 from scipy.stats import nakagami, rayleigh, gamma, invgamma, weibull_min
 import pickle
+import logging
 
 from functools import partial
 
@@ -39,6 +40,33 @@ def _get_pdf_skewnorm_from_dist():
 def _get_pdf_from_dist(dist):
     return partial(_get_pdf_data_from_dist, dist = dist)
 
+def _summarize_score_w_transform(
+        transform, transform_name, dist_approx_dict, true_yh, false_yh, summary_dir, split):
+
+    true_yh = transform(true_yh)
+    false_yh = transform(false_yh)
+
+    true_dist_approx = {
+        f'f{k}_true_approx' : v(true_yh) \
+        for k, v in dist_approx_dict.items()}
+    false_dist_approx = {
+        f'f{k}_false_approx' : v(false_yh)\
+        for k, v in dist_approx_dict.items()}
+
+    true_df = pd.DataFrame({'label' : 'True', 'score' : true_yh})
+    false_df = pd.DataFrame({'label' : 'False', 'score' : false_yh})
+
+    approx_true_dfs = [pd.DataFrame({'label' : k, 'score' : v }) \
+                                    for k, v in true_dist_approx.items()]
+    approx_false_dfs = [pd.DataFrame({'label' : k, 'score' : v }) \
+                                    for k, v in false_dist_approx.items()]
+
+    all_df = pd.concat((true_df, false_df,
+                        *approx_true_dfs, *approx_false_dfs),
+                        ignore_index = True)
+    fig = px.ecdf(all_df, x = 'score', color = 'label')
+    fig.write_html(os.path.join(summary_dir, f'{split}-f{transform_name}-scores.html'))
+
 def summarize_episode(summary_dir, ep_res, config):
     criteria_dir = joinmakedir(summary_dir, 'criteria')
     #Summarize criteria
@@ -62,38 +90,58 @@ def summarize_episode(summary_dir, ep_res, config):
 
         #Score distrib graph
         true_yh, false_yh = np_split_true_false(result.yh, result.y)
-        dist_approx_dict = {
-            'beta' : _get_pdf_from_dist(beta),
-            'norm' : _get_pdf_from_dist(norm),
-            'nakagami' : _get_pdf_from_dist(nakagami),
-            # 'boltzmann' : _get_pdf_from_dist(boltzmann),
-            'rayleigh' : _get_pdf_from_dist(rayleigh),
-            'gamma' : _get_pdf_from_dist(gamma),
-            'invgamma' : _get_pdf_from_dist(invgamma),
-            'weibull' : _get_pdf_from_dist(weibull_min),
-            # 'skewnorm' : _get_pdf_from_dist(skewnorm),
-            # 'nct' : _get_pdf_from_dist(nct),
-            }
-        true_dist_approx = {
-            f'f{k}_true_approx' : v(true_yh) \
-            for k, v in dist_approx_dict.items()}
-        false_dist_approx = {
-            f'f{k}_false_approx' : v(false_yh)\
-            for k, v in dist_approx_dict.items()}
+        _summarize_score_w_transform(
+            transform = lambda x: x,
+            transform_name = 'none',
+            dist_approx_dict = {
+                'norm' : _get_pdf_from_dist(norm)},
+            true_yh = true_yh,
+            false_yh = false_yh,
+            summary_dir = summary_dir,
+            split = split)
+        # _summarize_score_w_transform(
+        #     transform = lambda x: np.exp(x),
+        #     transform_name = 'exp',
+        #     #nakagami, rayleigh, gamma, invgamma, weibull_min
+        #     dist_approx_dict = {
+        #         'beta' : _get_pdf_from_dist(beta),
+        #         'nakagami' : _get_pdf_from_dist(nakagami),
+        #         'rayleigh' : _get_pdf_from_dist(rayleigh),
+        #         'invgamma' : _get_pdf_from_dist(invgamma),
+        #         'weibull_min' : _get_pdf_from_dist(weibull_min)},
+        #     true_yh = true_yh,
+        #     false_yh = false_yh,
+        #     summary_dir = summary_dir,
+        #     split = split)
+        # _summarize_score_w_transform(
+        #     transform = lambda x: x + np.min(x),
+        #     transform_name = 'pmin',
+        #     #nakagami, rayleigh, gamma, invgamma, weibull_min
+        #     dist_approx_dict = {
+        #         'beta' : _get_pdf_from_dist(beta),
+        #         'nakagami' : _get_pdf_from_dist(nakagami),
+        #         'rayleigh' : _get_pdf_from_dist(rayleigh),
+        #         'invgamma' : _get_pdf_from_dist(invgamma),
+        #         'weibull_min' : _get_pdf_from_dist(weibull_min)},
+        #     true_yh = true_yh,
+        #     false_yh = false_yh,
+        #     summary_dir = summary_dir,
+        #     split = split)
+        _summarize_score_w_transform(
+            transform = lambda x: 1/(1 + np.exp(-x)),
+            transform_name = 'sigm',
+            #nakagami, rayleigh, gamma, invgamma, weibull_min
+            dist_approx_dict = {
+                'beta' : _get_pdf_from_dist(beta),
+                'nakagami' : _get_pdf_from_dist(nakagami),
+                'rayleigh' : _get_pdf_from_dist(rayleigh),
+                'invgamma' : _get_pdf_from_dist(invgamma),
+                'weibull_min' : _get_pdf_from_dist(weibull_min)},
+            true_yh = true_yh,
+            false_yh = false_yh,
+            summary_dir = summary_dir,
+            split = split)
 
-        true_df = pd.DataFrame({'label' : 'True', 'score' : true_yh})
-        false_df = pd.DataFrame({'label' : 'False', 'score' : false_yh})
-
-        approx_true_dfs = [pd.DataFrame({'label' : k, 'score' : v }) \
-                                        for k, v in true_dist_approx.items()]
-        approx_false_dfs = [pd.DataFrame({'label' : k, 'score' : v }) \
-                                        for k, v in false_dist_approx.items()]
-
-        all_df = pd.concat((true_df, false_df,
-                            *approx_true_dfs, *approx_false_dfs),
-                           ignore_index = True)
-        fig = px.ecdf(all_df, x = 'score', color = 'label')
-        fig.write_html(os.path.join(summary_dir, f'{split}-scores.html'))
 
 @dataclass
 class CombinedRocResult:

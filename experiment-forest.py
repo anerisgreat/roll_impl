@@ -3,6 +3,7 @@ from functools import partial
 from torch import nn
 import numpy as np
 from functools import partial
+import logging
 
 from torchvision import datasets, transforms
 import logging
@@ -13,7 +14,7 @@ from src.datasets import ForestCoverDataset, Cifar10Dataset, TestGaussianDataset
 from src.utils import init_experiment
 from src.roll import roll_loss_from_fpr
 
-run_dir = init_experiment('results', 'forest')
+run_dir = init_experiment('results', 'forest', console_level = logging.DEBUG)
 
 class MyNet(nn.Module):
     def __init__(self):
@@ -32,15 +33,16 @@ device = torch.device('cpu')
 dataset = ForestCoverDataset()
 
 configurations = [
-    ExperimentConfiguration(
-        name = 'BCE',
-        model_creator_func = MyNet,
-        data_splitter = basic_data_splitter,
-        optim_class = torch.optim.Adam,
-        optim_args = {'lr' : 0.1},
-        criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), 100),
-        n_episodes = 5
-    )] + [
+    # ExperimentConfiguration(
+    #     name = 'BCE',
+    #     model_creator_func = MyNet,
+    #     data_splitter = basic_data_splitter,
+    #     optim_class = torch.optim.Adam,
+    #     optim_args = {'lr' : 0.1},
+    #     criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), 100),
+    #     n_episodes = 5
+    # )] + [
+    ] + [
             ExperimentConfiguration(
             name = f'roll-{rr:0.2f}',
             model_creator_func = MyNet,
@@ -50,7 +52,7 @@ configurations = [
             criteriorator = CRBasedCriteriorator(
                 roll_loss_from_fpr(rr), 100, [rr]),
             n_episodes = 5) \
-        for rr in [0.05, 0.02]
+        for rr in [0.30, 0.40]
     ]
 
 logging.info('Starting experiment!')

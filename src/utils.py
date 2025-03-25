@@ -51,7 +51,7 @@ def logging_get_default_config(
              "level" : logging.DEBUG}
         return base_dict
 
-def init_experiment(base_dir, experiment_name):
+def init_experiment(base_dir, experiment_name, console_level = logging.INFO):
     experiment_dir = joinmakedir(base_dir, experiment_name)
     run_dir = joinmakedir(
         experiment_dir,
@@ -59,7 +59,7 @@ def init_experiment(base_dir, experiment_name):
 
     loggingconfig.dictConfig(logging_get_default_config(
         debug_fname = os.path.join(run_dir, 'debug.log'),
-        console_level = logging.INFO))
+        console_level = console_level))
     #INIT LOG
     return run_dir
 

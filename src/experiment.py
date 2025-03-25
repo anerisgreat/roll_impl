@@ -10,6 +10,7 @@ from sklearn.metrics import roc_curve
 from functools import partial
 import multiprocessing as mp
 import time
+from scipy.stats import beta
 
 from .utils import joinmakedir
 from .summary import summarize_episode, summarize_all_episodes, summarize_all_configurations
@@ -54,7 +55,7 @@ class Criteriorator(ABC):
 
     def gen_criteria(self, yh, y):
         ret = self._gen_criteria_func(yh, y)
-        logging.debug(''.join([f'{c}: {ret[c][0]}' for c in ret.columns]))
+        logging.debug(', '.join([f'{c}: {ret[c][0]}' for c in ret.columns]))
         return ret
 
     @abstractmethod
@@ -128,8 +129,12 @@ class CRBasedCriteriorator(Criteriorator):
                         get_tpr_at_fprs(yh, y, self._fprs)))
         tfrs = dict(zip([f'tfr@{fpr:0.2f}' for fpr in self._fprs],
                         [1 - x for x in get_tpr_at_fprs(yh, y, self._fprs)]))
+        beta_tfrs = dict(zip([f'beta-tfr@{fpr:0.2f}' for fpr in self._fprs],
+                        [x for x in get_beta_fpr_at_fprs(yh, y, self._fprs)]))
 
-        return pd.DataFrame({**ret, **tprs, **tfrs})
+        ret_df = pd.DataFrame({**ret, **tprs, **tfrs, **beta_tfrs})
+        logging.debug(ret_df)
+        return ret_df
 
     def get_stop_best_flags(self, train_crit, val_crit):
         self._n_iters += 1
@@ -188,6 +193,27 @@ def get_tpr_at_fprs(yh, y, fprs):
     # roc_fprs, roc_tprs, _ = roc_curve((y > 0.).detach().numpy(), yh.detach().numpy())
     # return [_get_tpr_at_fpr_internal(fpr, roc_fprs, roc_tprs) \
     #         for fpr in fprs]
+
+def get_beta_fpr_at_fprs(yh, y, fprs):
+    yh = np.squeeze(yh.detach().numpy())
+
+    yh_sigm = 1/(1 + np.exp(-yh))
+
+
+    y = np.squeeze((y > 0.).detach().numpy())
+
+    yh_false = yh_sigm[np.argwhere(y == 0)]
+    yh_true = yh_sigm[np.argwhere(y > 0)]
+
+    try:
+        b_false = beta.fit(yh_false)
+        b_true = beta.fit(yh_true)
+
+        _get_val = lambda fpr: beta.cdf(beta.isf(1-fpr, *b_false), *b_true)
+        return [_get_val(fpr) for fpr in fprs]
+    except:
+        logging.info('Non convergence of fit')
+        return [0 for _ in fprs]
 
 def get_tpr_at_fpr(yh, y, fpr):
     return get_tpr_at_fprs(yh, y, [fpr])[0]

@@ -14,7 +14,9 @@ from src.datasets import ForestCoverDataset, Cifar10Dataset, TestGaussianDataset
 from src.utils import init_experiment
 from src.roll import roll_loss_from_fpr
 
-run_dir = init_experiment('results', 'forest')
+run_dir = init_experiment('results', 'cifar10')
+
+MAX_ITERS = 100
 
 class Net(nn.Module):
     def __init__(self):
@@ -43,21 +45,21 @@ configurations = [
         name = 'BCE',
         model_creator_func = Net,
         data_splitter = basic_data_splitter,
-        optim_class = torch.optim.Adam,
+        optim_class = torch.optim.SGD,
         optim_args = {'lr' : 0.1},
-        criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), 100),
+        criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), MAX_ITERS),
         n_episodes = 5
     )] + [
             ExperimentConfiguration(
             name = f'roll-{rr:0.2f}',
             model_creator_func = Net,
-            data_splitter = partial(basic_data_splitter, is_oneshot = False),
-            optim_class = torch.optim.Adam,
+            data_splitter = partial(basic_data_splitter, is_oneshot = True),
+            optim_class = torch.optim.SGD,
             optim_args = {'lr' : 0.1},
             criteriorator = CRBasedCriteriorator(
-                roll_loss_from_fpr(rr), 100, [rr]),
+                roll_loss_from_fpr(rr), MAX_ITERS, [rr]),
             n_episodes = 5) \
-        for rr in [0.05, 0.02]
+        for rr in [0.1, 0.3]
     ]
 
 logging.info('Starting experiment!')

@@ -1,5 +1,8 @@
 numpy
 scipy
 torch
+torchvision
 plotly
+scikit-learn
+matplotlib
 adult-dataset
