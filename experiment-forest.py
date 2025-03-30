@@ -5,14 +5,14 @@ import numpy as np
 from functools import partial
 import logging
 
-from torchvision import datasets, transforms
 import logging
 from src.experiment import run_configurations, basic_data_splitter, \
     BasicCriteriorator, ExperimentConfiguration, CRBasedCriteriorator, \
     oneshot_datasplitter
-from src.datasets import ForestCoverDataset, Cifar10Dataset, TestGaussianDataset
+from src.datasets import ForestCoverDataset
 from src.utils import init_experiment
-from src.roll import roll_loss_from_fpr
+
+from src.roll import roll_loss_from_fpr, roll_beta_loss_from_fpr
 
 run_dir = init_experiment('results', 'forest', console_level = logging.DEBUG)
 
@@ -22,7 +22,7 @@ class MyNet(nn.Module):
         layers = [
             x for y in [
                 [nn.Linear(10, 10), nn.ReLU()] for _ in range(0)]
-            for x in y]
+            for x in y] + [nn.Sigmoid()]
         self._layers = nn.Sequential(
             *layers, nn.Linear(10, 1))
 
@@ -33,24 +33,23 @@ device = torch.device('cpu')
 dataset = ForestCoverDataset()
 
 configurations = [
-    # ExperimentConfiguration(
-    #     name = 'BCE',
-    #     model_creator_func = MyNet,
-    #     data_splitter = basic_data_splitter,
-    #     optim_class = torch.optim.Adam,
-    #     optim_args = {'lr' : 0.1},
-    #     criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), 100),
-    #     n_episodes = 5
-    # )] + [
-    ] + [
+    ExperimentConfiguration(
+        name = 'BCE',
+        model_creator_func = MyNet,
+        data_splitter = basic_data_splitter,
+        optim_class = torch.optim.SGD,
+        optim_args = {'lr' : 0.1},
+        criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), 100),
+        n_episodes = 5
+    )] + [
             ExperimentConfiguration(
-            name = f'roll-{rr:0.2f}',
+            name = f'roll-beta-{rr:0.2f}',
             model_creator_func = MyNet,
             data_splitter = partial(basic_data_splitter, is_oneshot = True),
-            optim_class = torch.optim.Adam,
+            optim_class = torch.optim.SGD,
             optim_args = {'lr' : 0.1},
             criteriorator = CRBasedCriteriorator(
-                roll_loss_from_fpr(rr), 100, [rr]),
+                roll_beta_loss_from_fpr(rr), 100, [rr]),
             n_episodes = 5) \
         for rr in [0.30, 0.40]
     ]

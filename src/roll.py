@@ -1,5 +1,6 @@
 import torch
 import logging
+from .beta_dist import Beta
 def _torch_mean_std(yh):
     yhmean = torch.mean(yh)
     yhstd = torch.std(yh)
@@ -15,7 +16,6 @@ def split_true_false(yh, y):
 
     true_yh = yh[true_indeces]
     false_yh = yh[false_indeces]
-
     return true_yh, false_yh
 
 def roll_loss_from_fpr(fpr):
@@ -25,6 +25,16 @@ def roll_loss_from_fpr(fpr):
         false_normal = _torch_normal_fit(false_yh)
         return true_normal.cdf(false_normal.icdf(torch.tensor(1 - fpr)))
     return _partial
+
+def roll_beta_loss_from_fpr(fpr):
+    def _partial(yh, y):
+        yh = torch.nn.functional.sigmoid(yh)
+        true_yh, false_yh = split_true_false(yh, y)
+        true_beta = Beta.from_sample(true_yh)
+        false_beta = Beta.from_sample(false_yh)
+        return true_beta.cdf(false_beta.icdf(torch.tensor(1 - fpr)))
+    return _partial
+
 
 ##This part is non used
 #Calc moments

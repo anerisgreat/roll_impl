@@ -74,7 +74,7 @@ class BasicCriteriorator(Criteriorator):
 
     def init_episode(self):
         self._n_iters = 0
-        self._best_loss = np.infty
+        self._best_loss = np.inf
 
     def loss_func(self, yh, y):
         return self._loss_func(yh, y)
@@ -108,7 +108,7 @@ class CRBasedCriteriorator(Criteriorator):
 
     def init_episode(self):
         self._n_iters = 0
-        self._best_loss = np.infty
+        self._best_loss = np.inf
         self._best_crs = [0 for _ in self._fprs]
 
     def loss_func(self, yh, y):

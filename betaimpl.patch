@@ -1,0 +1,2550 @@
+diff --combined aten/src/ATen/native/Math.h
+index 6aa5481d00,47c0a2be03..0000000000
+--- a/aten/src/ATen/native/Math.h
++++ b/aten/src/ATen/native/Math.h
+@@@ -13,8 -13,6 +13,8 @@@
+  #include <cstdlib>
+  #include <limits>
+  #include <type_traits>
+ +#include <cassert>
+ +
+  
+  C10_CLANG_DIAGNOSTIC_PUSH()
+  #if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
+@@@ -3925,510 -3923,5 +3925,510 @@@ inline C10_HOST_DEVICE T spherical_bess
+  
+      return std::sin(x) / x;
+  } // T spherical_bessel_j0_forward(T x)
+ +  //
+ +  //
+ +/* below codes are from 'third_party/eigen/unsupported/Eigen/src/SpecialFunctions/SpecialFunctionsImpl.h' */
+ +// hard coded from eigen/Eigen/src/Core/util/Macros.h
+ +#define EIGEN_STRONG_INLINE inline  // hard coded Macro
+ +#define EIGEN_DEVICE_FUNC C10_HOST_DEVICE // hard coded Macro
+ +
+ +template <typename Scalar>
+ +struct cephes_helper {
+ +  EIGEN_DEVICE_FUNC
+ +  static EIGEN_STRONG_INLINE Scalar machep() { assert(false && "machep not supported for this type"); return 0.0; }
+ +  EIGEN_DEVICE_FUNC
+ +  static EIGEN_STRONG_INLINE Scalar big() { assert(false && "big not supported for this type"); return 0.0; }
+ +  EIGEN_DEVICE_FUNC
+ +  static EIGEN_STRONG_INLINE Scalar biginv() { assert(false && "biginv not supported for this type"); return 0.0; }
+ +};
+ +
+ +template <>
+ +struct cephes_helper<float> {
+ +  EIGEN_DEVICE_FUNC
+ +  static EIGEN_STRONG_INLINE float machep() {
+ +    return std::numeric_limits<float>::epsilon() / 2;  // 1.0 - machep == 1.0
+ +  }
+ +  EIGEN_DEVICE_FUNC
+ +  static EIGEN_STRONG_INLINE float big() {
+ +    // use epsneg (1.0 - epsneg == 1.0)
+ +    return 1.0f / (std::numeric_limits<float>::epsilon() / 2);
+ +  }
+ +  EIGEN_DEVICE_FUNC
+ +  static EIGEN_STRONG_INLINE float biginv() {
+ +    // epsneg
+ +    return machep();
+ +  }
+ +};
+ +
+ +template <>
+ +struct cephes_helper<double> {
+ +  EIGEN_DEVICE_FUNC
+ +  static EIGEN_STRONG_INLINE double machep() {
+ +    return std::numeric_limits<double>::epsilon() / 2;  // 1.0 - machep == 1.0
+ +  }
+ +  EIGEN_DEVICE_FUNC
+ +  static EIGEN_STRONG_INLINE double big() {
+ +    return 1.0 / std::numeric_limits<double>::epsilon();
+ +  }
+ +  EIGEN_DEVICE_FUNC
+ +  static EIGEN_STRONG_INLINE double biginv() {
+ +    // inverse of eps
+ +    return std::numeric_limits<double>::epsilon();
+ +  }
+ +};
+ +
+ +template <typename Scalar>
+ +struct betainc_impl {
+ +  EIGEN_DEVICE_FUNC
+ +  static EIGEN_STRONG_INLINE Scalar run(Scalar, Scalar, Scalar) {
+ +    /*    betaincf.c
+ +     *
+ +     *    Incomplete beta integral
+ +     *
+ +     *
+ +     * SYNOPSIS:
+ +     *
+ +     * float a, b, x, y, betaincf();
+ +     *
+ +     * y = betaincf( a, b, x );
+ +     *
+ +     *
+ +     * DESCRIPTION:
+ +     *
+ +     * Returns incomplete beta integral of the arguments, evaluated
+ +     * from zero to x.  The function is defined as
+ +     *
+ +     *                  x
+ +     *     -            -
+ +     *    | (a+b)      | |  a-1     b-1
+ +     *  -----------    |   t   (1-t)   dt.
+ +     *   -     -     | |
+ +     *  | (a) | (b)   -
+ +     *                 0
+ +     *
+ +     * The domain of definition is 0 <= x <= 1.  In this
+ +     * implementation a and b are restricted to positive values.
+ +     * The integral from x to 1 may be obtained by the symmetry
+ +     * relation
+ +     *
+ +     *    1 - betainc( a, b, x )  =  betainc( b, a, 1-x ).
+ +     *
+ +     * The integral is evaluated by a continued fraction expansion.
+ +     * If a < 1, the function calls itself recursively after a
+ +     * transformation to increase a to a+1.
+ +     *
+ +     * ACCURACY (float):
+ +     *
+ +     * Tested at random points (a,b,x) with a and b in the indicated
+ +     * interval and x between 0 and 1.
+ +     *
+ +     * arithmetic   domain     # trials      peak         rms
+ +     * Relative error:
+ +     *    IEEE       0,30       10000       3.7e-5      5.1e-6
+ +     *    IEEE       0,100      10000       1.7e-4      2.5e-5
+ +     * The useful domain for relative error is limited by underflow
+ +     * of the single precision exponential function.
+ +     * Absolute error:
+ +     *    IEEE       0,30      100000       2.2e-5      9.6e-7
+ +     *    IEEE       0,100      10000       6.5e-5      3.7e-6
+ +     *
+ +     * Larger errors may occur for extreme ratios of a and b.
+ +     *
+ +     * ACCURACY (double):
+ +     * arithmetic   domain     # trials      peak         rms
+ +     *    IEEE      0,5         10000       6.9e-15     4.5e-16
+ +     *    IEEE      0,85       250000       2.2e-13     1.7e-14
+ +     *    IEEE      0,1000      30000       5.3e-12     6.3e-13
+ +     *    IEEE      0,10000    250000       9.3e-11     7.1e-12
+ +     *    IEEE      0,100000    10000       8.7e-10     4.8e-11
+ +     * Outputs smaller than the IEEE gradual underflow threshold
+ +     * were excluded from these statistics.
+ +     *
+ +     * ERROR MESSAGES:
+ +     *   message         condition      value returned
+ +     * incbet domain      x<0, x>1          nan
+ +     * incbet underflow                     nan
+ +     */
+ +
+ +    assert((std::is_same<Scalar, Scalar>::value == false)); // "THIS_TYPE_IS_NOT_SUPPORTED"
+ +    return Scalar(0.);
+ +  }
+ +};
+ +
+ +/* Continued fraction expansion #1 for incomplete beta integral (small_branch = True)
+ + * Continued fraction expansion #2 for incomplete beta integral (small_branch = False)
+ + */
+ +template <typename Scalar>
+ +struct incbeta_cfe {
+ +  EIGEN_DEVICE_FUNC
+ +  static EIGEN_STRONG_INLINE Scalar run(Scalar a, Scalar b, Scalar x, bool small_branch) {
+ +    assert((std::is_same<Scalar, float>::value || std::is_same<Scalar, double>::value)); //"THIS_TYPE_IS_NOT_SUPPORTED"
+ +//    TORCH_INTERNAL_ASSERT((std::is_same<Scalar, float>::value ||
+ +//                         std::is_same<Scalar, double>::value),
+ +//                        "THIS_TYPE_IS_NOT_SUPPORTED");
+ +    const Scalar big = cephes_helper<Scalar>::big();
+ +    const Scalar machep = cephes_helper<Scalar>::machep();
+ +    const Scalar biginv = cephes_helper<Scalar>::biginv();
+ +
+ +    const Scalar zero = 0;
+ +    const Scalar one = 1;
+ +    const Scalar two = 2;
+ +
+ +    Scalar xk, pk, pkm1, pkm2, qk, qkm1, qkm2;
+ +    Scalar k1, k2, k3, k4, k5, k6, k7, k8, k26update;
+ +    Scalar ans;
+ +    int n;
+ +
+ +    const int num_iters = (std::is_same<Scalar, float>::value) ? 100 : 300;
+ +    const Scalar thresh =
+ +        (std::is_same<Scalar, float>::value) ? machep : Scalar(3) * machep;
+ +    Scalar r = (std::is_same<Scalar, float>::value) ? zero : one;
+ +
+ +    if (small_branch) {
+ +      k1 = a;
+ +      k2 = a + b;
+ +      k3 = a;
+ +      k4 = a + one;
+ +      k5 = one;
+ +      k6 = b - one;
+ +      k7 = k4;
+ +      k8 = a + two;
+ +      k26update = one;
+ +    } else {
+ +      k1 = a;
+ +      k2 = b - one;
+ +      k3 = a;
+ +      k4 = a + one;
+ +      k5 = one;
+ +      k6 = a + b;
+ +      k7 = a + one;
+ +      k8 = a + two;
+ +      k26update = -one;
+ +      x = x / (one - x);
+ +    }
+ +
+ +    pkm2 = zero;
+ +    qkm2 = one;
+ +    pkm1 = one;
+ +    qkm1 = one;
+ +    ans = one;
+ +    n = 0;
+ +
+ +    do {
+ +      xk = -(x * k1 * k2) / (k3 * k4);
+ +      pk = pkm1 + pkm2 * xk;
+ +      qk = qkm1 + qkm2 * xk;
+ +      pkm2 = pkm1;
+ +      pkm1 = pk;
+ +      qkm2 = qkm1;
+ +      qkm1 = qk;
+ +
+ +      xk = (x * k5 * k6) / (k7 * k8);
+ +      pk = pkm1 + pkm2 * xk;
+ +      qk = qkm1 + qkm2 * xk;
+ +      pkm2 = pkm1;
+ +      pkm1 = pk;
+ +      qkm2 = qkm1;
+ +      qkm1 = qk;
+ +
+ +      if (qk != zero) {
+ +        r = pk / qk;
+ +        if (std::abs(ans - r) < std::abs(r) * thresh) {
+ +          return r;
+ +        }
+ +        ans = r;
+ +      }
+ +
+ +      k1 += one;
+ +      k2 += k26update;
+ +      k3 += two;
+ +      k4 += two;
+ +      k5 += one;
+ +      k6 -= k26update;
+ +      k7 += two;
+ +      k8 += two;
+ +
+ +      if ((std::abs(qk) + std::abs(pk)) > big) {
+ +        pkm2 *= biginv;
+ +        pkm1 *= biginv;
+ +        qkm2 *= biginv;
+ +        qkm1 *= biginv;
+ +      }
+ +      if ((std::abs(qk) < biginv) || (std::abs(pk) < biginv)) {
+ +        pkm2 *= big;
+ +        pkm1 *= big;
+ +        qkm2 *= big;
+ +        qkm1 *= big;
+ +      }
+ +    } while (++n < num_iters);
+ +
+ +    return ans;
+ +  }
+ +};
+ +
+ +/* Helper functions depending on the Scalar type */
+ +template <typename Scalar>
+ +struct betainc_helper {};
+ +
+ +template <>
+ +struct betainc_helper<float> {
+ +  /* Core implementation, assumes a large (> 1.0) */
+ +  EIGEN_DEVICE_FUNC static EIGEN_STRONG_INLINE float incbsa(float aa, float bb,
+ +                                                            float xx) {
+ +    float ans, a, b, t, x, onemx;
+ +    bool reversed_a_b = false;
+ +
+ +    onemx = 1.0f - xx;
+ +
+ +    /* see if x is greater than the mean */
+ +    if (xx > (aa / (aa + bb))) {
+ +      reversed_a_b = true;
+ +      a = bb;
+ +      b = aa;
+ +      t = xx;
+ +      x = onemx;
+ +    } else {
+ +      a = aa;
+ +      b = bb;
+ +      t = onemx;
+ +      x = xx;
+ +    }
+ +
+ +    /* Choose expansion for optimal convergence */
+ +    if (b > 10.0f) {
+ +      if (std::abs(b * x / a) < 0.3f) {
+ +        t = betainc_helper<float>::incbps(a, b, x);
+ +        if (reversed_a_b) t = 1.0f - t;
+ +        return t;
+ +      }
+ +    }
+ +
+ +    ans = x * (a + b - 2.0f) / (a - 1.0f);
+ +    if (ans < 1.0f) {
+ +      ans = incbeta_cfe<float>::run(a, b, x, true /* small_branch */);
+ +      t = b * std::log(t);
+ +    } else {
+ +      ans = incbeta_cfe<float>::run(a, b, x, false /* small_branch */);
+ +      t = (b - 1.0f) * std::log(t);
+ +    }
+ +
+ +    t += a * std::log(x) + std::lgamma(a + b) -
+ +         std::lgamma(a) - std::lgamma(b);
+ +    t += std::log(ans / a);
+ +    t = std::exp(t);
+ +
+ +    if (reversed_a_b) t = 1.0f - t;
+ +    return t;
+ +  }
+ +
+ +  EIGEN_DEVICE_FUNC
+ +  static EIGEN_STRONG_INLINE float incbps(float a, float b, float x) {
+ +    float t, u, y, s;
+ +    const float machep = cephes_helper<float>::machep();
+ +
+ +    y = a * std::log(x) + (b - 1.0f) * std::log1p(-x) - std::log(a);
+ +    y -= std::lgamma(a) + std::lgamma(b);
+ +    y += std::lgamma(a + b);
+ +
+ +    t = x / (1.0f - x);
+ +    s = 0.0f;
+ +    u = 1.0f;
+ +    do {
+ +      b -= 1.0f;
+ +      if (b == 0.0f) {
+ +        break;
+ +      }
+ +      a += 1.0f;
+ +      u *= t * b / a;
+ +      s += u;
+ +    } while (std::abs(u) > machep);
+ +
+ +    return std::exp(y) * (1.0f + s);
+ +  }
+ +};
+ +
+ +template <>
+ +struct betainc_impl<float> {
+ +  EIGEN_DEVICE_FUNC
+ +  static float run(float a, float b, float x) {
+ +    const float nan = std::numeric_limits<float>::quiet_NaN();
+ +    float ans, t;
+ +
+ +    if (a <= 0.0f) return nan;
+ +    if (b <= 0.0f) return nan;
+ +    if ((x <= 0.0f) || (x >= 1.0f)) {
+ +      if (x == 0.0f) return 0.0f;
+ +      if (x == 1.0f) return 1.0f;
+ +      // mtherr("betaincf", DOMAIN);
+ +      return nan;
+ +    }
+ +
+ +    /* transformation for small aa */
+ +    if (a <= 1.0f) {
+ +      ans = betainc_helper<float>::incbsa(a + 1.0f, b, x);
+ +      t = a * std::log(x) + b * std::log1p(-x) +
+ +          std::lgamma(a + b) - std::lgamma(a + 1.0f) -
+ +          std::lgamma(b);
+ +      return (ans + std::exp(t));
+ +    } else {
+ +      return betainc_helper<float>::incbsa(a, b, x);
+ +    }
+ +  }
+ +};
+ +
+ +template <>
+ +struct betainc_helper<double> {
+ +  EIGEN_DEVICE_FUNC
+ +  static EIGEN_STRONG_INLINE double incbps(double a, double b, double x) {
+ +    const double machep = cephes_helper<double>::machep();
+ +
+ +    double s, t, u, v, n, t1, z, ai;
+ +
+ +    ai = 1.0 / a;
+ +    u = (1.0 - b) * x;
+ +    v = u / (a + 1.0);
+ +    t1 = v;
+ +    t = u;
+ +    n = 2.0;
+ +    s = 0.0;
+ +    z = machep * ai;
+ +    while (std::abs(v) > z) {
+ +      u = (n - b) * x / n;
+ +      t *= u;
+ +      v = t / (a + n);
+ +      s += v;
+ +      n += 1.0;
+ +    }
+ +    s += t1;
+ +    s += ai;
+ +
+ +    u = a * std::log(x);
+ +    // TODO: gamma() is not directly implemented in Eigen.
+ +    /*
+ +    if ((a + b) < maxgam && std::abs(u) < maxlog) {
+ +      t = gamma(a + b) / (gamma(a) * gamma(b));
+ +      s = s * t * pow(x, a);
+ +    }
+ +    */
+ +    t = std::lgamma(a + b) - std::lgamma(a) -
+ +        std::lgamma(b) + u + std::log(s);
+ +    return s = std::exp(t);
+ +  }
+ +};
+ +
+ +template <>
+ +struct betainc_impl<double> {
+ +  EIGEN_DEVICE_FUNC
+ +  static double run(double aa, double bb, double xx) {
+ +    const double nan = std::numeric_limits<double>::quiet_NaN();
+ +    const double machep = cephes_helper<double>::machep();
+ +    // const double maxgam = 171.624376956302725;
+ +
+ +    double a, b, t, x, xc, w, y;
+ +    bool reversed_a_b = false;
+ +
+ +    if (aa <= 0.0 || bb <= 0.0) {
+ +      return nan;  // goto domerr;
+ +    }
+ +
+ +    if ((xx <= 0.0) || (xx >= 1.0)) {
+ +      if (xx == 0.0) return (0.0);
+ +      if (xx == 1.0) return (1.0);
+ +      // mtherr("incbet", DOMAIN);
+ +      return nan;
+ +    }
+  
+ +    if ((bb * xx) <= 1.0 && xx <= 0.95) {
+ +      return betainc_helper<double>::incbps(aa, bb, xx);
+ +    }
+ +
+ +    w = 1.0 - xx;
+ +
+ +    /* Reverse a and b if x is greater than the mean. */
+ +    if (xx > (aa / (aa + bb))) {
+ +      reversed_a_b = true;
+ +      a = bb;
+ +      b = aa;
+ +      xc = xx;
+ +      x = w;
+ +    } else {
+ +      a = aa;
+ +      b = bb;
+ +      xc = w;
+ +      x = xx;
+ +    }
+ +
+ +    if (reversed_a_b && (b * x) <= 1.0 && x <= 0.95) {
+ +      t = betainc_helper<double>::incbps(a, b, x);
+ +      if (t <= machep) {
+ +        t = 1.0 - machep;
+ +      } else {
+ +        t = 1.0 - t;
+ +      }
+ +      return t;
+ +    }
+ +
+ +    /* Choose expansion for better convergence. */
+ +    y = x * (a + b - 2.0) - (a - 1.0);
+ +    if (y < 0.0) {
+ +      w = incbeta_cfe<double>::run(a, b, x, true /* small_branch */);
+ +    } else {
+ +      w = incbeta_cfe<double>::run(a, b, x, false /* small_branch */) / xc;
+ +    }
+ +
+ +    /* Multiply w by the factor
+ +         a      b   _             _     _
+ +        x  (1-x)   | (a+b) / ( a | (a) | (b) ) .   */
+ +
+ +    y = a * std::log(x);
+ +    t = b * std::log(xc);
+ +    // TODO: gamma is not directly implemented in Eigen.
+ +    /*
+ +    if ((a + b) < maxgam && numext::abs(y) < maxlog && numext::abs(t) < maxlog)
+ +    {
+ +      t = pow(xc, b);
+ +      t *= pow(x, a);
+ +      t /= a;
+ +      t *= w;
+ +      t *= gamma(a + b) / (gamma(a) * gamma(b));
+ +    } else {
+ +    */
+ +    /* Resort to logarithms.  */
+ +    y += t + std::lgamma(a + b) - std::lgamma(a) -
+ +         std::lgamma(b);
+ +    y += std::log(w / a);
+ +    t = std::exp(y);
+ +
+ +    /* } */
+ +    // done:
+ +
+ +    if (reversed_a_b) {
+ +      if (t <= machep) {
+ +        t = 1.0 - machep;
+ +      } else {
+ +        t = 1.0 - t;
+ +      }
+ +    }
+ +    return t;
+ +  }
+ +};
+ +
+ +/* end of third_party/eigen/unsupported/Eigen/src/SpecialFunctions/SpecialFunctionsImpl.h */
+ +
+ +template <typename T>
+ +inline C10_HOST_DEVICE T calc_betainc(T a, T b, T x) {
+ +    if (std::is_same_v<T, float>) {
+ +        const float _x = x, _a = a, _b = b;
+ +        return betainc_impl<T>::run(_a, _b, _x);
+ +    } else if (std::is_same_v<T, double>) {
+ +        const double _x = x, _a = a, _b = b;
+ +        return betainc_impl<T>::run(_a, _b, _x);
+ +    } else {
+ +        //promote to float
+ +        const float _x = static_cast<float>(x);
+ +        const float _a = static_cast<float>(a);
+ +        const float _b = static_cast<float>(b);
+ +        return static_cast<T>(betainc_impl<float>::run(_a,_b,_x));
+ +    }
+ +}
+  C10_CLANG_DIAGNOSTIC_POP()
+diff --combined aten/src/ATen/native/native_functions.yaml
+index e7fe5ab26c,9a645dd70f..0000000000
+--- a/aten/src/ATen/native/native_functions.yaml
++++ b/aten/src/ATen/native/native_functions.yaml
+@@@ -13481,74 -13481,6 +13481,74 @@@
+      CompositeExplicitAutograd: special_zeta_out
+    tags: pointwise
+  
+ +- func: special_betainc(Tensor a, Tensor b, Tensor x) -> Tensor
+ +  device_check: NoCheck   # TensorIterator
+ +  python_module: special
+ +  variants: function
+ +  structured_delegate: special_betainc.out
+ +  tags: pointwise
+ +
+ +- func: special_betainc.out(Tensor a, Tensor b, Tensor x, *, Tensor(a!) out) -> Tensor(a!)
+ +  device_check: NoCheck   # TensorIterator
+ +  structured: True
+ +  structured_inherits: TensorIteratorBase
+ +  python_module: special
+ +  variants: function
+ +  dispatch:
+ +    CPU, CUDA: special_betainc_out
+ +  tags: pointwise
+ +
+ +- func: special_betaln(Tensor a, Tensor b) -> Tensor
+ +  device_check: NoCheck   # TensorIterator
+ +  python_module: special
+ +  variants: function
+ +  structured_delegate: special_betaln.out
+ +  tags: pointwise
+ +
+ +- func: special_betaln.out(Tensor a, Tensor b, *, Tensor(a!) out) -> Tensor(a!)
+ +  device_check: NoCheck   # TensorIterator
+ +  structured: True
+ +  structured_inherits: TensorIteratorBase
+ +  python_module: special
+ +  variants: function
+ +  dispatch:
+ +    CPU, CUDA: special_betaln_out
+ +  tags: pointwise
+ +
+ +- func: special_betaincinv(Tensor a, Tensor b, Tensor y) -> Tensor
+ +  device_check: NoCheck   # TensorIterator
+ +  python_module: special
+ +  variants: function
+ +  structured_delegate: special_betaincinv.out
+ +  tags: pointwise
+ +
+ +- func: special_betaincinv.out(Tensor a, Tensor b, Tensor y, *, Tensor(a!) out) -> Tensor(a!)
+ +  device_check: NoCheck   # TensorIterator
+ +  structured: True
+ +  structured_inherits: TensorIteratorBase
+ +  python_module: special
+ +  variants: function
+ +  dispatch:
+ +    CPU, CUDA: special_betaincinv_out
+ +  tags: pointwise
+ +
+ +- func: _special_betainc_partials(Tensor a, Tensor b, Tensor x) -> (Tensor, Tensor, Tensor)
+ +  device_check: NoCheck
+ +  variants: function
+ +  dispatch:
+ +    Meta: _special_betainc_partials_meta
+ +    CompositeExplicitAutogradNonFunctional: _special_betainc_partials
+ +  tags: pointwise
+ +
+ +
+ +- func: _special_betaincinv_partials(Tensor a, Tensor b, Tensor y) -> (Tensor, Tensor, Tensor)
+ +  device_check: NoCheck
+ +  variants: function
+ +  dispatch:
+ +    Meta: _special_betaincinv_partials_meta
+ +    CompositeExplicitAutogradNonFunctional: _special_betaincinv_partials
+ +  tags: pointwise
+ +
+  - func: special_i0(Tensor self) -> Tensor
+    python_module: special
+    variants: function
+diff --combined build_variables.bzl
+index 8a655a2282,3f72fd70a7..0000000000
+--- a/build_variables.bzl
++++ b/build_variables.bzl
+@@@ -1210,7 -1210,6 +1210,7 @@@ aten_native_source_codegen_list = 
+      "aten/src/ATen/native/cpu/FusedAdamKernel.cpp",
+      "aten/src/ATen/native/cpu/FusedSGDKernel.cpp",
+      "aten/src/ATen/native/cpu/FusedAdagradKernel.cpp",
+ +    "aten/src/ATen/native/cpu/BetaOpsKernel.cpp",
+  ]
+  
+  # This aten native source file list will not go through aten codegen process
+@@@ -1310,7 -1309,6 +1310,7 @@@ aten_native_source_non_codegen_list = 
+      "aten/src/ATen/native/Cross.cpp",
+      "aten/src/ATen/native/DilatedMaxPool2d.cpp",
+      "aten/src/ATen/native/DilatedMaxPool3d.cpp",
+ +    "aten/src/Aten/native/BetaOps.cpp",
+      # Referenced by both native and ATen/Version.cpp. Does not reference to other native symbols
+      # "aten/src/ATen/native/DispatchStub.cpp",
+      # "aten/src/ATen/native/quantized/cpu/init_qnnpack.cpp",
+diff --combined docs/source/special.rst
+index 0fba76eafc,9617947546..0000000000
+--- a/docs/source/special.rst
++++ b/docs/source/special.rst
+@@@ -50,9 -50,3 +50,9 @@@ Function
+  .. autofunction:: xlog1py
+  .. autofunction:: xlogy
+  .. autofunction:: zeta
+ +.. autofunction:: beta
+ +.. autofunction:: betaln
+ +.. autofunction:: betainc
+ +.. autofunction:: betaincc
+ +.. autofunction:: betaincinv
+ +.. autofunction:: betainccinv
+diff --combined test/allowlist_for_publicAPI.json
+index 820c34dec1,f4b4c621eb..0000000000
+--- a/test/allowlist_for_publicAPI.json
++++ b/test/allowlist_for_publicAPI.json
+@@@ -934,12 -934,6 +934,12 @@@
+      "bessel_j1",
+      "bessel_y0",
+      "bessel_y1",
+ +    "beta",
+ +    "betainc",
+ +    "betaincc",
+ +    "betainccinv",
+ +    "betaincinv",
+ +    "betaln",
+      "chebyshev_polynomial_t",
+      "chebyshev_polynomial_u",
+      "chebyshev_polynomial_v",
+diff --combined test/distributed/tensor/test_dtensor_ops.py
+index c0f245adb4,647160eb71..0000000000
+--- a/test/distributed/tensor/test_dtensor_ops.py
++++ b/test/distributed/tensor/test_dtensor_ops.py
+@@@ -382,9 -382,6 +382,9 @@@ dtensor_fails = 
+      xfail("special.bessel_j1"),
+      xfail("special.bessel_y0"),
+      xfail("special.bessel_y1"),
+ +    xfail("special.betainc"),
+ +    xfail("special.betaincinv"),
+ +    xfail("special.betaln"),
+      xfail("special.chebyshev_polynomial_t"),
+      xfail("special.chebyshev_polynomial_u"),
+      xfail("special.entr"),
+diff --combined test/expect/HasDecompTest.test_has_decomposition.expect
+index 7fdf67b024,3faa118656..0000000000
+--- a/test/expect/HasDecompTest.test_has_decomposition.expect
++++ b/test/expect/HasDecompTest.test_has_decomposition.expect
+@@@ -568,8 -568,6 +568,8 @@@ aten::_sparse_sum_backwar
+  aten::_sparse_sum_backward.out
+  aten::_spdiags
+  aten::_spdiags.out
+ +aten::_special_betainc_partials
+ +aten::_special_betaincinv_partials
+  aten::_spsolve
+  aten::_stack
+  aten::_stack.out
+@@@ -1212,12 -1210,6 +1212,12 @@@ aten::special_bessel_y
+  aten::special_bessel_y0.out
+  aten::special_bessel_y1
+  aten::special_bessel_y1.out
+ +aten::special_betainc
+ +aten::special_betainc.out
+ +aten::special_betaincinv
+ +aten::special_betaincinv.out
+ +aten::special_betaln
+ +aten::special_betaln.out
+  aten::special_chebyshev_polynomial_t
+  aten::special_chebyshev_polynomial_t.n_scalar
+  aten::special_chebyshev_polynomial_t.n_scalar_out
+diff --combined test/functorch/test_ops.py
+index f20127dda4,145905f08f..0000000000
+--- a/test/functorch/test_ops.py
++++ b/test/functorch/test_ops.py
+@@@ -1402,9 -1402,6 +1402,9 @@@ class TestOperators(TestCase)
+                  xfail("svd_lowrank", ""),
+                  xfail("nn.functional.feature_alpha_dropout", "with_train"),
+                  xfail("special.log_ndtr", ""),
+ +                xfail("special.betainc", ""),
+ +                xfail("special.betaincinv", ""),
+ +                xfail("special.betaln", ""),
+                  xfail("fft.ihfft2"),  # conj_physical fallback
+                  xfail("fft.ihfftn"),  # conj_physical fallback
+                  xfail("nn.functional.max_unpool3d", "grad"),
+diff --combined test/functorch/test_vmap.py
+index 9aa4f00837,d552179fc9..0000000000
+--- a/test/functorch/test_vmap.py
++++ b/test/functorch/test_vmap.py
+@@@ -4536,12 -4536,6 +4536,12 @@@ class TestVmapOperatorsOpInfo(TestCase)
+                  xfail("jiterator_unary", device_type="cuda"),
+                  xfail("jiterator_2inputs_2outputs", device_type="cuda"),
+                  xfail("special.airy_ai"),
+ +                xfail("special.beta"),
+ +                xfail("special.betainc"),
+ +                xfail("special.betaincc"),
+ +                xfail("special.betainccinv"),
+ +                xfail("special.betaincinv"),
+ +                xfail("special.betaln"),
+                  xfail("clamp_min", ""),
+                  xfail("sparse.sampled_addmm"),
+                  xfail("sparse.mm", "reduce"),
+diff --combined tools/autograd/derivatives.yaml
+index 0500302e2a,a474aeaf56..0000000000
+--- a/tools/autograd/derivatives.yaml
++++ b/tools/autograd/derivatives.yaml
+@@@ -1031,30 -1031,6 +1031,30 @@@
+  - name: special_zeta.other_scalar(Tensor self, Scalar other) -> Tensor
+    self: not_implemented("zeta")
+  
+ +- name: special_betaln(Tensor a, Tensor b) -> Tensor
+ +  a: grad * (at::digamma(a) - at::digamma(a + b))
+ +  b: grad * (at::digamma(b) - at::digamma(a + b))
+ +  result: (at::digamma(a_p) - at::digamma(a_p + b_p)) * a_t + (at::digamma(b_p) - at::digamma(a_p + b_p)) * b_t
+ +
+ +
+ +- name: special_betainc(Tensor a, Tensor b, Tensor x) -> Tensor
+ +  a, b, x: "[&]() {
+ +            if (!grad.defined())
+ +              return std::make_tuple(Tensor(), Tensor(), Tensor());
+ +            auto [g_a, g_b, g_x] = at::GradMode::is_enabled() ? at::native::_special_betainc_partials(a, b, x) : _special_betainc_partials(a, b, x);
+ +            return std::make_tuple(grad * g_a, grad * g_b, grad * g_x); }()"
+ +  result: "[&]() { auto [g_a, g_b, g_x] = at::GradMode::is_enabled() ? at::native::_special_betainc_partials(a_p, b_p, x_p) : _special_betainc_partials(a_p, b_p, x_p);
+ +                   return g_a * a_t + g_b * b_t + g_x * x_t; }()"
+ +
+ +- name: special_betaincinv(Tensor a, Tensor b, Tensor y) -> Tensor
+ +  a, b, y: "[&]() {
+ +            if (!grad.defined())
+ +              return std::make_tuple(Tensor(), Tensor(), Tensor());
+ +            auto [g_a, g_b, g_y] = at::GradMode::is_enabled() ? at::native::_special_betaincinv_partials(a, b, y) : _special_betaincinv_partials(a, b, y);
+ +            return std::make_tuple(grad * g_a, grad * g_b, grad * g_y); }()"
+ +  result: "[&]() { auto [g_a, g_b, g_y] = at::GradMode::is_enabled() ? at::native::_special_betaincinv_partials(a_p, b_p, y_p) : _special_betaincinv_partials(a_p, b_p, y_p);
+ +                   return g_a * a_t + g_b * b_t + g_y * y_t; }()"
+ +
+  - name: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
+    self: zeros_like(grad)
+    result: self_t.zero_()
+diff --combined torch/_dynamo/trace_rules.py
+index 20f6e8fda8,da71649a2b..0000000000
+--- a/torch/_dynamo/trace_rules.py
++++ b/torch/_dynamo/trace_rules.py
+@@@ -1181,11 -1181,6 +1181,11 @@@ torch_c_binding_in_graph_functions = di
+          "torch._C._sparse._spdiags",
+          "torch._C._sparse.sparse_sampled_addmm",
+          "torch._C._special.special_airy_ai",
+ +        "torch._C._special.special_betainc",
+ +        "torch._C._special.special_betaincinv",
+ +        "torch._C._special.special_betaln",
+ +        "torch._special_betainc_partials",
+ +        "torch._special_betaincinv_partials",
+          "torch._C._special.special_bessel_j0",
+          "torch._C._special.special_bessel_j1",
+          "torch._C._special.special_bessel_y0",
+diff --combined torch/_inductor/codegen/common.py
+index 3843e53142,152d2ef361..0000000000
+--- a/torch/_inductor/codegen/common.py
++++ b/torch/_inductor/codegen/common.py
+@@@ -1016,11 -1016,6 +1016,11 @@@ pointwise_overrides_data: dict[str, Ove
+          cpp=lambda x: f"airy_ai_forward({x})",
+          name="special_airy_ai",
+      ),
+ +    betainc=OverridesData(
+ +        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+ +        cpp=lambda a, b, x: f"calc_betainc({a}, {b}, {x})",
+ +        name="special_betainc",
+ +    ),
+      bessel_j0=OverridesData(
+          type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+          cpp=lambda x: f"bessel_j0_forward({x})",
+diff --combined torch/_inductor/lowering.py
+index 8c29a2e3c3,a04b8fc481..0000000000
+--- a/torch/_inductor/lowering.py
++++ b/torch/_inductor/lowering.py
+@@@ -6439,13 -6439,6 +6439,13 @@@ register_lowering
+      aten.special_erf, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+  )(erf)
+  
+ +make_fallback(aten._special_betainc_partials)
+ +
+ +make_fallback(aten.special_betaincinv)
+ +make_fallback(aten._special_betaincinv_partials)
+ +
+ +make_fallback(aten.special_betaln)
+ +
+  register_pointwise_numeric(aten.log1p)
+  register_pointwise_numeric(aten.tan)
+  register_pointwise_numeric(aten.tanh)
+diff --combined torch/_inductor/ops_handler.py
+index 54a933a100,692857f260..0000000000
+--- a/torch/_inductor/ops_handler.py
++++ b/torch/_inductor/ops_handler.py
+@@@ -518,9 -518,6 +518,9 @@@ class OpsHandler(Generic[T])
+      def airy_ai(self, x: T) -> T:
+          raise NotImplementedError
+  
+ +    def betainc(self, a: T, b: T, x: T) -> T:
+ +        raise NotImplementedError
+ +
+      def bessel_j0(self, x: T) -> T:
+          raise NotImplementedError
+  
+diff --combined torch/csrc/api/include/torch/special.h
+index 1d4e633905,7ab96c123f..0000000000
+--- a/torch/csrc/api/include/torch/special.h
++++ b/torch/csrc/api/include/torch/special.h
+@@@ -452,44 -452,6 +452,44 @@@ inline Tensor& zeta_out
+    return torch::special_zeta_out(result, self, other);
+  }
+  
+ +/// Computes betaln
+ +/// ```
+ +inline Tensor betaln(const Tensor& a, const Tensor& b) {
+ +  return torch::special_betaln(a, b);
+ +}
+ +
+ +inline Tensor& betaln_out(Tensor& result, const Tensor& a, const Tensor& b) {
+ +  return torch::special_betaln_out(result, a, b);
+ +}
+ +
+ +/// Computes betainc
+ +/// ```
+ +inline Tensor betainc(const Tensor& a, const Tensor& b, const Tensor& x) {
+ +  return torch::special_betainc(a, b, x);
+ +}
+ +
+ +inline Tensor& betainc_out(
+ +    Tensor& result,
+ +    const Tensor& a,
+ +    const Tensor& b,
+ +    const Tensor& x) {
+ +  return torch::special_betainc_out(result, a, b, x);
+ +}
+ +
+ +/// Computes betaincinv
+ +/// ```
+ +inline Tensor betaincinv(const Tensor& a, const Tensor& b, const Tensor& y) {
+ +  return torch::special_betaincinv(a, b, y);
+ +}
+ +
+ +inline Tensor& betaincinv_out(
+ +    Tensor& result,
+ +    const Tensor& a,
+ +    const Tensor& b,
+ +    const Tensor& y) {
+ +  return torch::special_betaincinv_out(result, a, b, y);
+ +}
+ +
+  /// Computes the zeroth order modified Bessel function of the first kind of
+  /// input, elementwise See
+  /// https://pytorch.org/docs/main/special.html#torch.special.i0
+diff --combined torch/csrc/autograd/FunctionsManual.cpp
+index e363fc3876,e5ee41e6fd..0000000000
+--- a/torch/csrc/autograd/FunctionsManual.cpp
++++ b/torch/csrc/autograd/FunctionsManual.cpp
+@@@ -22,7 -22,6 +22,7 @@@
+  #include <ATen/native/SparseTensorUtils.h>
+  #include <ATen/native/nested/NestedTensorUtils.h>
+  #include <c10/core/TensorOptions.h>
+ +#include <c10/util/MathConstants.h>
+  #include <c10/util/OptionalArrayRef.h>
+  #include <c10/util/SmallBuffer.h>
+  #include <c10/util/accumulate.h>
+diff --combined torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.h
+index 6045e92948,682364e950..0000000000
+--- a/torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.h
++++ b/torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.h
+@@@ -38,8 -38,6 +38,8 @@@ AOTI_TORCH_EXPORT AOTITorchError aoti_t
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__scaled_dot_product_fused_attention_overrideable(AtenTensorHandle query, AtenTensorHandle key, AtenTensorHandle value, AtenTensorHandle* attn_bias, double dropout_p, int32_t is_causal, int32_t return_debug_mask, double* scale, AtenTensorHandle* ret0, AtenTensorHandle* ret1, AtenTensorHandle* ret2, AtenTensorHandle* ret3, int64_t* ret4, int64_t* ret5, AtenTensorHandle* ret6, AtenTensorHandle* ret7, AtenTensorHandle* ret8);
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__scaled_dot_product_fused_attention_overrideable_backward(AtenTensorHandle grad_out, AtenTensorHandle query, AtenTensorHandle key, AtenTensorHandle value, AtenTensorHandle attn_bias, const int32_t* grad_input_mask, int64_t grad_input_mask_len_, AtenTensorHandle out, AtenTensorHandle logsumexp, AtenTensorHandle cum_seq_q, AtenTensorHandle cum_seq_k, int64_t max_q, int64_t max_k, double dropout_p, int32_t is_causal, AtenTensorHandle philox_seed, AtenTensorHandle philox_offset, double* scale, AtenTensorHandle* ret0, AtenTensorHandle* ret1, AtenTensorHandle* ret2, AtenTensorHandle* ret3);
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__segment_reduce_backward(AtenTensorHandle grad, AtenTensorHandle output, AtenTensorHandle data, const char* reduce, AtenTensorHandle* lengths, AtenTensorHandle* offsets, int64_t axis, double* initial, AtenTensorHandle* ret0);
+ +AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__special_betainc_partials(AtenTensorHandle a, AtenTensorHandle b, AtenTensorHandle x, AtenTensorHandle* ret0, AtenTensorHandle* ret1, AtenTensorHandle* ret2);
+ +AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__special_betaincinv_partials(AtenTensorHandle a, AtenTensorHandle b, AtenTensorHandle y, AtenTensorHandle* ret0, AtenTensorHandle* ret1, AtenTensorHandle* ret2);
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__to_sparse(AtenTensorHandle self, int32_t* layout, const int64_t** blocksize, int64_t blocksize_len_, int64_t* dense_dim, AtenTensorHandle* ret0);
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__trilinear(AtenTensorHandle i1, AtenTensorHandle i2, AtenTensorHandle i3, const int64_t* expand1, int64_t expand1_len_, const int64_t* expand2, int64_t expand2_len_, const int64_t* expand3, int64_t expand3_len_, const int64_t* sumdim, int64_t sumdim_len_, int64_t unroll_dim, AtenTensorHandle* ret0);
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__weight_int8pack_mm(AtenTensorHandle self, AtenTensorHandle mat2, AtenTensorHandle scales, AtenTensorHandle* ret0);
+@@@ -136,8 -134,6 +136,8 @@@ AOTI_TORCH_EXPORT AOTITorchError aoti_t
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_soft_margin_loss_backward(AtenTensorHandle grad_output, AtenTensorHandle self, AtenTensorHandle target, int64_t reduction, AtenTensorHandle* ret0);
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_sort(AtenTensorHandle self, int64_t dim, int32_t descending, AtenTensorHandle* ret0, AtenTensorHandle* ret1);
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_sort_stable(AtenTensorHandle self, int32_t* stable, int64_t dim, int32_t descending, AtenTensorHandle* ret0, AtenTensorHandle* ret1);
+ +AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_special_betaincinv(AtenTensorHandle a, AtenTensorHandle b, AtenTensorHandle y, AtenTensorHandle* ret0);
+ +AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_special_betaln(AtenTensorHandle a, AtenTensorHandle b, AtenTensorHandle* ret0);
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_to_sparse(AtenTensorHandle self, int32_t* layout, const int64_t** blocksize, int64_t blocksize_len_, int64_t* dense_dim, AtenTensorHandle* ret0);
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_topk(AtenTensorHandle self, int64_t k, int64_t dim, int32_t largest, int32_t sorted, AtenTensorHandle* ret0, AtenTensorHandle* ret1);
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_triangular_solve(AtenTensorHandle self, AtenTensorHandle A, int32_t upper, int32_t transpose, int32_t unitriangular, AtenTensorHandle* ret0, AtenTensorHandle* ret1);
+diff --combined torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.h
+index 8042bdb332,277267d315..0000000000
+--- a/torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.h
++++ b/torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.h
+@@@ -46,8 -46,6 +46,8 @@@ AOTI_TORCH_EXPORT AOTITorchError aoti_t
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda__scaled_mm(AtenTensorHandle self, AtenTensorHandle mat2, AtenTensorHandle scale_a, AtenTensorHandle scale_b, AtenTensorHandle* bias, AtenTensorHandle* scale_result, int32_t* out_dtype, int32_t use_fast_accum, AtenTensorHandle* ret0);
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda__scaled_mm_out(AtenTensorHandle out, AtenTensorHandle self, AtenTensorHandle mat2, AtenTensorHandle scale_a, AtenTensorHandle scale_b, AtenTensorHandle* bias, AtenTensorHandle* scale_result, int32_t* out_dtype, int32_t use_fast_accum);
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda__segment_reduce_backward(AtenTensorHandle grad, AtenTensorHandle output, AtenTensorHandle data, const char* reduce, AtenTensorHandle* lengths, AtenTensorHandle* offsets, int64_t axis, double* initial, AtenTensorHandle* ret0);
+ +AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda__special_betainc_partials(AtenTensorHandle a, AtenTensorHandle b, AtenTensorHandle x, AtenTensorHandle* ret0, AtenTensorHandle* ret1, AtenTensorHandle* ret2);
+ +AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda__special_betaincinv_partials(AtenTensorHandle a, AtenTensorHandle b, AtenTensorHandle y, AtenTensorHandle* ret0, AtenTensorHandle* ret1, AtenTensorHandle* ret2);
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda__thnn_fused_lstm_cell(AtenTensorHandle input_gates, AtenTensorHandle hidden_gates, AtenTensorHandle cx, AtenTensorHandle* input_bias, AtenTensorHandle* hidden_bias, AtenTensorHandle* ret0, AtenTensorHandle* ret1, AtenTensorHandle* ret2);
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda__to_sparse(AtenTensorHandle self, int32_t* layout, const int64_t** blocksize, int64_t blocksize_len_, int64_t* dense_dim, AtenTensorHandle* ret0);
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda__trilinear(AtenTensorHandle i1, AtenTensorHandle i2, AtenTensorHandle i3, const int64_t* expand1, int64_t expand1_len_, const int64_t* expand2, int64_t expand2_len_, const int64_t* expand3, int64_t expand3_len_, const int64_t* sumdim, int64_t sumdim_len_, int64_t unroll_dim, AtenTensorHandle* ret0);
+@@@ -143,8 -141,6 +143,8 @@@ AOTI_TORCH_EXPORT AOTITorchError aoti_t
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_soft_margin_loss_backward(AtenTensorHandle grad_output, AtenTensorHandle self, AtenTensorHandle target, int64_t reduction, AtenTensorHandle* ret0);
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_sort(AtenTensorHandle self, int64_t dim, int32_t descending, AtenTensorHandle* ret0, AtenTensorHandle* ret1);
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_sort_stable(AtenTensorHandle self, int32_t* stable, int64_t dim, int32_t descending, AtenTensorHandle* ret0, AtenTensorHandle* ret1);
+ +AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_special_betaincinv(AtenTensorHandle a, AtenTensorHandle b, AtenTensorHandle y, AtenTensorHandle* ret0);
+ +AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_special_betaln(AtenTensorHandle a, AtenTensorHandle b, AtenTensorHandle* ret0);
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_to_sparse(AtenTensorHandle self, int32_t* layout, const int64_t** blocksize, int64_t blocksize_len_, int64_t* dense_dim, AtenTensorHandle* ret0);
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_topk(AtenTensorHandle self, int64_t k, int64_t dim, int32_t largest, int32_t sorted, AtenTensorHandle* ret0, AtenTensorHandle* ret1);
+  AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_triangular_solve(AtenTensorHandle self, AtenTensorHandle A, int32_t upper, int32_t transpose, int32_t unitriangular, AtenTensorHandle* ret0, AtenTensorHandle* ret1);
+diff --combined torch/csrc/utils/python_arg_parser.cpp
+index f532fd1ecf,5fbf972b2b..0000000000
+--- a/torch/csrc/utils/python_arg_parser.cpp
++++ b/torch/csrc/utils/python_arg_parser.cpp
+@@@ -119,12 -119,6 +119,12 @@@ bool should_allow_numbers_as_tensors(co
+        "floor_divide",
+        "floor_divide_",
+        "floor_divide_out",
+ +      "special_betainc",
+ +      "special_betainc_out",
+ +      "special_betaincinv",
+ +      "special_betaincinv_out",
+ +      "special_betaln",
+ +      "special_betaln_out",
+        "_conj"}; // _conj needed because mul.Tensor backward calls it
+    return allowed.find(name) != allowed.end();
+  }
+diff --combined torch/distributions/beta.py
+index 5b9c58489c,e030b648a8..0000000000
+--- a/torch/distributions/beta.py
++++ b/torch/distributions/beta.py
+@@@ -107,7 -107,4 +107,7 @@@ class Beta(ExponentialFamily)
+          return (self.concentration1, self.concentration0)
+  
+      def _log_normalizer(self, x, y):
+ -        return torch.lgamma(x) + torch.lgamma(y) - torch.lgamma(x + y)
+ +        return torch.special.betaln(x, y)
+ +
+ +    def cdf(self, x):
+ +        return torch.special.betainc(self.concentration1, self.concentration0, x)
+diff --combined torch/overrides.py
+index a13e793a8b,e7cb75e624..0000000000
+--- a/torch/overrides.py
++++ b/torch/overrides.py
+@@@ -1164,12 -1164,6 +1164,12 @@@ def get_testing_overrides() -> dict[Cal
+          torch.special.bessel_j1: lambda input: -1,
+          torch.special.bessel_y0: lambda input: -1,
+          torch.special.bessel_y1: lambda input: -1,
+ +        torch.special.beta: lambda a, b: -1,
+ +        torch.special.betainc: lambda a, b, x: -1,
+ +        torch.special.betaincc: lambda a, b, x: -1,
+ +        torch.special.betainccinv: lambda a, b, y: -1,
+ +        torch.special.betaincinv: lambda a, b, y: -1,
+ +        torch.special.betaln: lambda a, b: -1,
+          torch.special.chebyshev_polynomial_t: lambda input, n, out=None: -1,
+          torch.special.chebyshev_polynomial_u: lambda input, n, out=None: -1,
+          torch.special.chebyshev_polynomial_v: lambda input, n, out=None: -1,
+diff --combined torch/special/__init__.py
+index 2671f3f0ff,9f872c93a4..0000000000
+--- a/torch/special/__init__.py
++++ b/torch/special/__init__.py
+@@@ -1,8 -1,5 +1,8 @@@
+ +from typing import Union
+ +
+  import torch
+  from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
+ +from torch._prims_common import Number, NumberType, TensorLike, TensorLikeType
+  from torch._torch_docs import common_args, multi_dim_common
+  
+  
+@@@ -63,12 -60,6 +63,12 @@@ __all__ = 
+      "xlog1py",
+      "xlogy",
+      "zeta",
+ +    "beta",
+ +    "betaln",
+ +    "betainc",
+ +    "betaincc",
+ +    "betaincinv",
+ +    "betainccinv",
+  ]
+  
+  Tensor = torch.Tensor
+@@@ -608,274 -599,6 +608,274 @@@ Example:
+      ),
+  )
+  
+ +betainc = _add_docstr(
+ +    _special.special_betainc,
+ +    r"""
+ +betainc(a, b, x, out=None) -> Tensor
+ +Computes the regularized incomplete Beta function (as defined below)
+ +for each element of :attr:`a`, :attr:`b`, :attr:`x`.
+ +
+ +.. math::
+ +    \frac{1}{\Beta(a,b)} \int_0^x t^{a-1}\,(1-t)^{b-1}\,dt
+ +
+ +Similar to SciPy's `scipy.special.betainc`.
+ +"""
+ +    + r"""
+ +Args:
+ +    a (Number or Tensor) : (:attr:`a > 0`)
+ +    b (Number or Tensor) : (:attr:`b > 0`)
+ +    x (Number or Tensor) : the upper limit of integration (:attr:`0 < x < 1`)
+ +
+ +Keyword args:
+ +    {out}
+ +
+ +Example::
+ +    >>> x = torch.tensor([-1, 0, 1, float('inf'), float('nan')])
+ +    >>> torch.special.betainc(1, 2, x)
+ +    tensor([nan, 0., 1., nan, nan])
+ +    >>> x = torch.tensor([0.15, 0.34, 0.99])
+ +    >>> a = torch.tensor([1, 2, 3.1])
+ +    >>> b = torch.tensor([2, 4, 1.4])
+ +    >>> torch.special.betainc(a, b, x)
+ +    tensor([0.2775, 0.5522, 0.9933])
+ +    >>> torch.special.betainc(a, 2, x)
+ +    tensor([0.2775, 0.2682, 0.9994])
+ +    >>> torch.special.betainc(2, b, x)
+ +    tensor([0.0608, 0.5522, 0.9962])
+ +    >>> torch.special.betainc(2, 1, x)
+ +    tensor([0.0225, 0.1156, 0.9801])
+ +""".format(
+ +        **common_args
+ +    ),
+ +)
+ +
+ +
+ +def betaincc(
+ +    a: Union[TensorLikeType, NumberType],
+ +    b: Union[TensorLikeType, NumberType],
+ +    x: Union[TensorLikeType, NumberType],
+ +) -> TensorLikeType:
+ +    (
+ +        r"""
+ +    betaincc(a, b, x, out=None) -> Tensor
+ +    Computes the complement of the regularized incomplete Beta function (as defined below)
+ +    for each element of :attr:`x`,  :attr:`a`, :attr:`b`.
+ +
+ +    .. math::
+ +        1 - \frac{1}{\Beta(a,b)} \int_0^x t^{a-1}\,(1-t)^{b-1}\,dt
+ +
+ +    Similar to SciPy's `scipy.special.betaincc`.
+ +    """
+ +        + r"""
+ +    Args:
+ +        a (Number or Tensor) : (:attr:`a > 0`)
+ +        b (Number or Tensor) : (:attr:`b > 0`)
+ +        x (Number or Tensor) : the upper limit of integration (:attr:`0 < x < 1`)
+ +
+ +    Keyword args:
+ +        {out}
+ +
+ +    Example::
+ +        >>> x = torch.tensor([-1, 0, 1, float('inf'), float('nan')])
+ +        >>> torch.special.betaincc(1, 2, x)
+ +        tensor([nan, 1., 0., nan, nan])
+ +        >>> x = torch.tensor([0.15, 0.34, 0.99])
+ +        >>> a = torch.tensor([1, 2, 3.1])
+ +        >>> b = torch.tensor([2, 4, 1.4])
+ +        >>> torch.special.betaincc(a, b, x)
+ +        tensor([0.7225, 0.4478, 0.0067])
+ +        >>> torch.special.betaincc(a, 2, x)
+ +        tensor([7.2250e-01, 7.3181e-01, 6.2662e-04])
+ +        >>> torch.special.betaincc(2, b, x)
+ +        tensor([0.9392, 0.4478, 0.0038])
+ +        >>> torch.special.betaincc(2, 1, x)
+ +        tensor([0.9775, 0.8844, 0.0199])
+ +    """
+ +    )
+ +    torch._check(
+ +        isinstance(x, TensorLike)
+ +        or isinstance(a, TensorLike)
+ +        or isinstance(b, TensorLike),
+ +        lambda: "Expected either argument x, a or b to be a Tensor",
+ +    )
+ +
+ +    return 1 - torch.special.betainc(a, b, x)
+ +
+ +
+ +betaincinv = _add_docstr(
+ +    _special.special_betaincinv,
+ +    r"""
+ +betaincinv(y, a, b, out=None) -> Tensor
+ +Computes the inverse of the regularized incomplete Beta function (as defined below)
+ +for each element of :attr:`a`, :attr:`b`, :attr:`y`.
+ +The inverse of the regularized incomplete Beta function is defined in the range :math:`(0, 1)` as:
+ +
+ +.. math::
+ +    \mathrm{betaincinv}(\mathrm{betainc}(x, a, b), a, b) = x
+ +
+ +Similar to SciPy's `scipy.special.betaincinv`.
+ +"""
+ +    + r"""
+ +Args:
+ +    a (Number or Tensor) : (:attr:`a > 0`)
+ +    b (Number or Tensor) : (:attr:`b > 0`)
+ +    y (Number or Tensor) : Real-valued y (:attr:`0 < y < 1`)
+ +
+ +Keyword args:
+ +    {out}
+ +
+ +Example::
+ +    >>> y = torch.tensor([-1, 0, 1, float('inf'), float('nan')])
+ +    >>> torch.special.betaincinv(1, 2, y)
+ +    tensor([nan, 0., 1., nan, nan])
+ +    >>> a = torch.tensor([1, 2, 3.1])
+ +    >>> b = torch.tensor([2, 4, 1.4])
+ +    >>> y = torch.tensor([0.2775, 0.5522, 0.9933])
+ +    >>> torch.special.betaincinv(a, b, y)
+ +    tensor([0.1500, 0.3400, 0.9900])
+ +    >>> y = torch.tensor([0.2775, 0.2682, 0.9994])
+ +    >>> torch.special.betaincinv(a, 2, y)
+ +    tensor([0.1500, 0.3400, 0.9902])
+ +    >>> y = torch.tensor([0.0608, 0.5522, 0.9962])
+ +    >>> torch.special.betaincinv(2, b, y)
+ +    tensor([0.1501, 0.3400, 0.9900])
+ +    >>> y = torch.tensor([0.0225, 0.1156, 0.9801])
+ +    >>> torch.special.betaincinv(2, 1, y)
+ +    tensor([0.1500, 0.3400, 0.9900])
+ +""".format(
+ +        **common_args
+ +    ),
+ +)
+ +
+ +
+ +def betainccinv(
+ +    a: Union[TensorLikeType, NumberType],
+ +    b: Union[TensorLikeType, NumberType],
+ +    y: Union[TensorLikeType, NumberType],
+ +) -> TensorLikeType:
+ +    (
+ +        r"""
+ +    betainccinv(a, b, y, out=None) -> Tensor
+ +    Computes the inverse of the complement of the regularized incomplete Beta function (as defined below)
+ +    The inverse of the complement of the regularized incomplete Beta function is defined in the range :math:`(0, 1)` as:
+ +    for each element of :attr:`a`, :attr:`b`, :attr:`y`.
+ +
+ +    .. math::
+ +        \mathrm{betainccinv}(\mathrm{betaincc}(x, a, b), a, b) = x
+ +
+ +    Similar to SciPy's `scipy.special.betainccinv`.
+ +    """
+ +        + r"""
+ +    Args:
+ +        a (Number or Tensor) : (:attr:`a > 0`)
+ +        b (Number or Tensor) : (:attr:`b > 0`)
+ +        y (Number or Tensor) : Real-valued y (:attr:`0 < y < 1`)
+ +
+ +    Keyword args:
+ +        {out}
+ +
+ +    Example::
+ +        >>> y = torch.tensor([-1, 0, 1, float('inf'), float('nan')])
+ +        >>> torch.special.betainccinv(1, 2, y)
+ +        tensor([nan, 1., 0., nan, nan])
+ +        >>> a = torch.tensor([1, 2, 3.1])
+ +        >>> b = torch.tensor([2, 4, 1.4])
+ +        >>> y = torch.tensor([0.7225, 0.4478, 0.0067])
+ +        >>> torch.special.betainccinv(a, b, y)
+ +        tensor([0.1500, 0.3400, 0.9900])
+ +        >>> y = torch.tensor([7.2250e-01, 7.3181e-01, 6.2662e-04])
+ +        >>> torch.special.betainccinv(a, 2, y)
+ +        tensor([0.1500, 0.3400, 0.9900])
+ +        >>> y = torch.tensor([0.9392, 0.4478, 0.0038])
+ +        >>> torch.special.betainccinv(2, b, y)
+ +        tensor([0.1501, 0.3400, 0.9900])
+ +        >>> y = torch.tensor([0.9775, 0.8844, 0.0199])
+ +        >>> torch.special.betainccinv(2, 1, y)
+ +        tensor([0.1500, 0.3400, 0.9900])
+ +    """
+ +    )
+ +    torch._check(
+ +        isinstance(y, TensorLike)
+ +        or isinstance(a, TensorLike)
+ +        or isinstance(b, TensorLike),
+ +        lambda: "Expected either argument y, a or b to be a Tensor",
+ +    )
+ +
+ +    return torch.special.betaincinv(a, b, 1 - y)
+ +
+ +
+ +betaln = _add_docstr(
+ +    _special.special_betaln,
+ +    r"""
+ +betaln(a, b, out=None) -> Tensor
+ +>>>>>>> 869ccac817c (torch/special/__init__.py: docstring has been written)
+ +Computes the natural logarithm of absolute value of Beta function (as defined below)
+ +for each element of :attr:`a`, :attr:`b`.
+ +
+ +.. math::
+ +    \log\,|\,\Beta(a,b)\,|
+ +
+ +Similar to SciPy's `scipy.special.betaln`.
+ +"""
+ +    + r"""
+ +Args:
+ +    a (Tensor) : (:attr:`a > 0`)
+ +    b (Tensor) : (:attr:`b > 0`)
+ +
+ +Keyword args:
+ +    {out}
+ +
+ +Example::
+ +    >>> torch.special.betaln( torch.tensor([-1, 0, 1, float('inf'), float('nan')]), torch.tensor(9))
+ +    tensor([    inf,     inf, -2.1972,     nan,     nan])
+ +    >>> torch.special.betaln(torch.tensor([2., 4., 5.]), torch.tensor(9.))
+ +    tensor([-4.4998, -7.5909, -8.7695])
+ +    >>> torch.special.betaln(torch.tensor(9.), torch.tensor(9.))
+ +    tensor(-12.2959)
+ +""".format(
+ +        **common_args
+ +    ),
+ +)
+ +
+ +
+ +def beta(
+ +    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+ +) -> TensorLikeType:
+ +    (
+ +        r"""
+ +    beta(a, b, out=None) -> Tensor
+ +    Computes the Beta function (as defined below)
+ +    for each element of :attr:`a`, :attr:`b`.
+ +    .. math::
+ +        \frac{\Gamma(a) * \Gamma(b)}{\Gamma(a + b)}
+ +
+ +    Similar to SciPy's `scipy.special.beta`.
+ +    """
+ +        + r"""
+ +    Args:
+ +        a (Tensor) : (:attr:`a > 0`)
+ +        b (Tensor) : (:attr:`b > 0`)
+ +
+ +    Keyword args:
+ +        {out}
+ +
+ +    Example::
+ +        >>> torch.special.beta(torch.tensor([-1, 0, 1, float('inf'), float('nan')]), torch.tensor(9))
+ +        tensor([   inf,    inf, 0.1111,    nan,    nan])
+ +        >>> torch.special.beta(torch.tensor([2., 4., 5.]), torch.tensor(9.))
+ +        tensor([0.0111, 0.0005, 0.0002])
+ +        >>> torch.special.beta(torch.tensor(9.), torch.tensor(9.))
+ +        tensor(4.5706e-06)
+ +    """
+ +    )
+ +    torch._check(
+ +        isinstance(a, TensorLike) or isinstance(b, TensorLike),
+ +        lambda: "Expected either argument a or b to be a Tensor",
+ +    )
+ +
+ +    return torch.exp(torch.special.betaln(a, b))
+ +
+ +
+  i1 = _add_docstr(
+      _special.special_i1,
+      r"""
+diff --combined torch/testing/_internal/common_methods_invocations.py
+index 885faa7737,ec0775cad3..0000000000
+--- a/torch/testing/_internal/common_methods_invocations.py
++++ b/torch/testing/_internal/common_methods_invocations.py
+@@@ -11659,71 -11659,6 +11659,71 @@@ def sample_inputs_alias_copy(op_info, d
+      yield SampleInput(make_tensor((), dtype=dtype, device=device, requires_grad=requires_grad))
+  
+  
+ +def sample_inputs_ternary_beta_family(op_info, device, dtype, requires_grad, **kwargs):
+ +    make_arg_probs = partial(
+ +        make_tensor,
+ +        dtype=dtype,
+ +        device=device,
+ +        requires_grad=requires_grad,
+ +        exclude_zero=True,
+ +        low=0.1,
+ +        high=0.9,
+ +    )
+ +
+ +    make_arg_params = partial(
+ +        make_tensor,
+ +        dtype=dtype,
+ +        device=device,
+ +        requires_grad=requires_grad,
+ +        exclude_zero=True,
+ +        low=0.1,
+ +    )
+ +    li_make_arg = [make_arg_params, make_arg_params, make_arg_probs]
+ +
+ +    test_cases = [
+ +        (((S, S), (S, S), (S, S)), False),
+ +        (((S, 1), (1, S), (S, S)), False),
+ +        (((S, S, 1), (1, S), (1,)), True),
+ +        (((), (), ()), False),
+ +        (((), (), (S, S)), True),
+ +        (((S, S, 1), (1, S), ()), True),
+ +    ]
+ +
+ +    for input_args, broadcasts_input in test_cases:
+ +        args = tuple(
+ +            li_make_arg[idx](arg, exclude_zero=True) if isinstance(arg, tuple) else arg
+ +            for idx, arg in enumerate(input_args)
+ +        )
+ +        yield SampleInput(*args).with_metadata(broadcasts_input=broadcasts_input)
+ +
+ +def sample_inputs_binary_beta_family(op_info, device, dtype, requires_grad, **kwargs):
+ +    make_arg_params = partial(
+ +        make_tensor,
+ +        dtype=dtype,
+ +        device=device,
+ +        requires_grad=requires_grad,
+ +        exclude_zero=True,
+ +        low=0.1,
+ +    )
+ +
+ +    li_make_arg = [make_arg_params, make_arg_params]
+ +
+ +    test_cases = [
+ +        (((S, S), (S, S)), False),
+ +        (((S, S), (S, 1)), False),
+ +        (((1,), (S, S)), True),
+ +        (((), ()), False),
+ +        (((S, S), ()), True),
+ +        (((), (1, S)), True),
+ +    ]
+ +    for input_args, broadcasts_input in test_cases:
+ +        args = tuple(
+ +            li_make_arg[idx](arg, exclude_zero=True) if isinstance(arg, tuple) else arg
+ +            for idx, arg in enumerate(input_args)
+ +        )
+ +        yield SampleInput(*args).with_metadata(broadcasts_input=broadcasts_input)
+ +
+ +
+  # Operator database (sorted alphabetically)
+  op_db: list[OpInfo] = [
+      UnaryUfuncInfo('abs',
+@@@ -12084,60 -12019,6 +12084,60 @@@
+                 DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+                 DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+             )),
+ +    OpInfo('special.betainc',
+ +           aten_name='special_betainc',
+ +           ref=scipy.special.betainc,
+ +           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+ +           backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
+ +           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+ +           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+ +           supports_forward_ad=True,
+ +           supports_inplace_autograd=False,
+ +           supports_fwgrad_bwgrad=True,
+ +           supports_autograd=True,
+ +           sample_inputs_func=sample_inputs_ternary_beta_family,
+ +           skips=(
+ +               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+ +               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+ +               DecorateInfo(unittest.skip("Test expects tensor input"), "TestOperators", "test_vmapjvpall_has_batch_rule"),
+ +               DecorateInfo(unittest.skip("Test expects tensor input"), "TestOperators", "test_vmapvjp_has_batch_rule"),
+ +           )),
+ +    OpInfo('special.betaincinv',
+ +           aten_name='special_betaincinv',
+ +           ref=scipy.special.betaincinv,
+ +           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+ +           backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
+ +           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+ +           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+ +           supports_forward_ad=True,
+ +           supports_inplace_autograd=False,
+ +           supports_fwgrad_bwgrad=True,
+ +           supports_autograd=True,
+ +           sample_inputs_func=sample_inputs_ternary_beta_family,
+ +           skips=(
+ +               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+ +               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+ +               DecorateInfo(unittest.skip("Test expects tensor input"), "TestOperators", "test_vmapjvpall_has_batch_rule"),
+ +               DecorateInfo(unittest.skip("Test expects tensor input"), "TestOperators", "test_vmapvjp_has_batch_rule"),
+ +           )),
+ +    OpInfo('special.betaln',
+ +           aten_name='special_betaln',
+ +           ref=scipy.special.betaln,
+ +           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+ +           backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
+ +           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+ +           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+ +           supports_forward_ad=True,
+ +           supports_inplace_autograd=False,
+ +           supports_fwgrad_bwgrad=True,
+ +           supports_autograd=True,
+ +           sample_inputs_func=sample_inputs_binary_beta_family,
+ +           skips=(
+ +               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+ +               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+ +               DecorateInfo(unittest.skip("Test expects tensor input"), "TestOperators", "test_vmapjvpall_has_batch_rule"),
+ +               DecorateInfo(unittest.skip("Test expects tensor input"), "TestOperators", "test_vmapvjp_has_batch_rule"),
+ +           )),
+      OpInfo('uniform',
+             op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.uniform_, inp, *args, **kwargs),
+             method_variant=None,
+diff --combined torchgen/aoti/fallback_ops.py
+index 4120fbd9eb,a2a6cf1b1a..0000000000
+--- a/torchgen/aoti/fallback_ops.py
++++ b/torchgen/aoti/fallback_ops.py
+@@@ -155,8 -155,4 +155,8 @@@ inductor_fallback_ops = 
+      "aten.view_as_real.default",
+      "aten.view.dtype",
+      "aten._weight_int8pack_mm.default",
+ +    "aten._special_betainc_partials.default",
+ +    "aten.special_betaincinv.default",
+ +    "aten._special_betaincinv_partials.default",
+ +    "aten.special_betaln.default",
+  }
+diff --combined torchgen/static_runtime/generator.py
+index dfc2b6e65e,bc1772422a..0000000000
+--- a/torchgen/static_runtime/generator.py
++++ b/torchgen/static_runtime/generator.py
+@@@ -203,11 -203,6 +203,11 @@@ BLOCKED_OPS = frozenset
+          "alias_copy",
+          "_triton_multi_head_attention",
+          "special_airy_ai",
+ +        "special_betainc",
+ +        "special_betaincinv",
+ +        "special_betaln",
+ +        "_special_betainc_partials",
+ +        "_special_betaincinv_partials",
+          "special_bessel_j0",
+          "special_bessel_j1",
+          "special_bessel_y0",
+diff --git a/aten/src/ATen/native/BetaOps.cpp b/aten/src/ATen/native/BetaOps.cpp
+new file mode 100644
+index 0000000000..2260fdf773
+--- /dev/null
++++ b/aten/src/ATen/native/BetaOps.cpp
+@@ -0,0 +1,1019 @@
++#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
++#include <ATen/native/BetaOps.h>
++
++#include <ATen/core/Tensor.h>
++#include <ATen/native/Resize.h>
++#include <ATen/ScalarOps.h>
++#include <ATen/TensorIterator.h>
++#include <ATen/TensorOperators.h>
++#include <ATen/TensorMeta.h>
++#include <c10/util/MathConstants.h>
++
++#ifndef AT_PER_OPERATOR_HEADERS
++#include <ATen/Functions.h>
++#include <ATen/NativeFunctions.h>
++#else
++#include <ATen/ops/tensor.h>
++#include <ATen/ops/special_betainc.h>
++#include <ATen/ops/special_betainc_native.h>
++#include <ATen/ops/special_betaincinv.h>
++#include <ATen/ops/special_betaincinv_native.h>
++#include <ATen/ops/special_betaln.h>
++#include <ATen/ops/special_betaln_native.h>
++#include <ATen/ops/minimum.h>
++#include <ATen/ops/minimum_native.h>
++#include <ATen/ops/maximum.h>
++#include <ATen/ops/maximum_native.h>
++#include <ATen/ops/log1p.h>
++#include <ATen/ops/log1p_native.h>
++#include <ATen/ops/reciprocal.h>
++#include <ATen/ops/reciprocal_native.h>
++#include <ATen/ops/log.h>
++#include <ATen/ops/log_native.h>
++#include <ATen/ops/lgamma.h>
++#include <ATen/ops/lgamma_native.h>
++#include <ATen/ops/where.h>
++#include <ATen/ops/where_native.h>
++#include <ATen/ops/sqrt.h>
++#include <ATen/ops/sqrt_native.h>
++#include <ATen/ops/exp.h>
++#include <ATen/ops/exp_native.h>
++#include <ATen/ops/expm1.h>
++#include <ATen/ops/expm1_native.h>
++#include <ATen/core/ATen_fwd.h>
++#include <ATen/ops/clamp.h>
++#include <ATen/ops/clamp_native.h>
++#include <ATen/ops/special_ndtri.h>
++#include <ATen/ops/special_ndtri_native.h>
++#include <ATen/ops/zeros_like.h>
++#include <ATen/ops/zeros_like_native.h>
++#include <ATen/ops/ones_like.h>
++#include <ATen/ops/ones_like_native.h>
++#include <ATen/ops/xlogy.h>
++#include <ATen/ops/xlogy_native.h>
++#include <ATen/ops/abs.h>
++#include <ATen/ops/abs_native.h>
++#include <ATen/ops/special_xlog1py.h>
++#include <ATen/ops/special_xlog1py_native.h>
++#include <ATen/ops/equal.h>
++#include <ATen/ops/equal_native.h>
++#include <ATen/ops/square.h>
++#include <ATen/ops/square_native.h>
++#include <ATen/ops/eq.h>
++#include <ATen/ops/eq_native.h>
++
++#include <ATen/ops/cat.h>
++#include <ATen/ops/cat_native.h>
++#include <ATen/ops/special_digamma.h>
++#include <ATen/ops/special_digamma_native.h>
++#include <ATen/ops/digamma.h>
++#include <ATen/ops/digamma_native.h>
++#include <ATen/ops/unbind.h>
++#include <ATen/ops/unbind_native.h>
++
++
++#include <ATen/ops/scalar_tensor.h>
++#include <ATen/ops/scalar_tensor_native.h>
++
++#include <ATen/ops/empty.h>
++#include <ATen/ops/empty_native.h>
++#include <ATen/ops/broadcast_tensors.h>
++#include <ATen/ops/broadcast_tensors_native.h>
++
++#endif
++
++namespace at::meta {
++
++#define FLOAT_OP_CONFIG()                       \
++  TensorIteratorConfig()                        \
++    .set_check_mem_overlap(true)                \
++    .allow_cpu_scalars(true)                    \
++    .promote_inputs_to_common_dtype(true)       \
++    .cast_common_dtype_to_outputs(true)         \
++    .enforce_safe_casting_to_output(true)       \
++    .promote_integer_inputs_to_float(true)
++
++TORCH_META_FUNC(special_betainc) (const Tensor& a, const Tensor& b, const Tensor& x) {
++  build(FLOAT_OP_CONFIG()
++      .add_output(maybe_get_output())
++      .add_const_input(a)
++      .add_const_input(b)
++      .add_const_input(x));
++}
++
++TORCH_META_FUNC(special_betaln) (const Tensor& a, const Tensor& b) {
++  build(FLOAT_OP_CONFIG()
++      .add_output(maybe_get_output())
++      .add_const_input(a)
++      .add_const_input(b));
++}
++
++TORCH_META_FUNC(special_betaincinv) (const Tensor& a, const Tensor& b, const Tensor& y) {
++  build(FLOAT_OP_CONFIG()
++      .add_output(maybe_get_output())
++      .add_const_input(a)
++      .add_const_input(b)
++      .add_const_input(y));
++}
++
++} // namespace at::meta
++
++
++namespace at::native {
++
++DEFINE_DISPATCH(betainc_stub);
++
++TORCH_IMPL_FUNC(special_betainc_out) (const Tensor& a, const Tensor& b, const Tensor& x, const Tensor& result) {
++  betainc_stub(device_type(), *this);
++}
++
++static Tensor _log_gamma_correction(const Tensor& x) {
++  static const std::vector<double> const_vec = {
++        0.833333333333333e-01L,
++        -0.277777777760991e-02L,
++        0.793650666825390e-03L,
++        -0.595202931351870e-03L,
++        0.837308034031215e-03L,
++        -0.165322962780713e-02L,
++        };
++  Tensor minimax_coeff = at::tensor(const_vec, at::TensorOptions().dtype(x.dtype()).device(x.device()));
++
++  Tensor inverse_x = at::reciprocal(x);
++  Tensor inverse_x_squared = inverse_x * inverse_x;
++  Tensor accum = minimax_coeff[5];
++  for (int i = 4; i >= 0; i--) {
++    accum = accum * inverse_x_squared + minimax_coeff[i];
++  }
++  return accum * inverse_x;
++}
++
++static Tensor _log_gamma_difference_big_y(const Tensor& x, const Tensor& y) {
++  Tensor cancelled_stirling = (-1.0 * (x + y - 0.5) * at::log1p(x / y)
++                               - x * at::log(y) + x);
++  Tensor correction = _log_gamma_correction(y) - _log_gamma_correction(x + y);
++  return correction + cancelled_stirling;
++}
++
++static Tensor _special_betaln(const Tensor& x, const Tensor& y) {
++  at::ScalarType dtype_orig = at::promoteTypes(x.scalar_type(), y.scalar_type());
++  bool should_promote_dtype = ((dtype_orig == at::ScalarType::BFloat16) | (dtype_orig == at::ScalarType::Half)) ? true : false;
++  at::ScalarType dtype = should_promote_dtype ? at::ScalarType::Float : dtype_orig;
++  Tensor __x = x.to(dtype);
++  Tensor __y = y.to(dtype);
++
++  auto options = at::TensorOptions().dtype(dtype).device(x.device());
++
++  Tensor _x = at::minimum(__x, __y);
++  Tensor _y = at::maximum(__x, __y);
++  Tensor log2pi = at::log(2.0 * at::scalar_tensor(c10::pi<double>, options));
++
++  // Two large arguments case: _y >= _x >= 8
++  Tensor log_beta_two_large = (0.5 * log2pi
++                               - 0.5 * at::log(_y)
++                               + _log_gamma_correction(_x)
++                               + _log_gamma_correction(_y)
++                               - _log_gamma_correction(_x + _y)
++                               + (_x - 0.5) * at::log(_x / (_x + _y))
++                               - _y * at::log1p(_x / _y));
++  // Small arguments case: _x < 8, _y >= 8.
++  Tensor log_beta_one_large = at::lgamma(_x) + _log_gamma_difference_big_y(_x, _y);
++
++  // Small arguments case: _x <= _y < 8.
++  Tensor log_beta_small = at::lgamma(_x) + at::lgamma(_y) - at::lgamma(_x + _y);
++
++  Tensor result = at::where(_x >= 8.0,
++                   log_beta_two_large,
++                   at::where(_y >= 8.0,
++                             log_beta_one_large,
++                             log_beta_small));
++  if (should_promote_dtype)
++    result = result.to(dtype_orig);
++
++  return result;
++}
++
++TORCH_IMPL_FUNC(special_betaln_out) (const Tensor& a, const Tensor& b, const Tensor& result) {
++  TORCH_CHECK(!a.is_complex() && !b.is_complex(),
++              "special.betaln is not yet implemented for complex tensors.");
++
++  TORCH_CHECK(!isIntegralType(a.scalar_type(), true) || !isIntegralType(b.scalar_type(), true),
++              "special.betaln must have at least one floating parameter.");
++  const Tensor&& result_tmp = _special_betaln(a, b);
++  at::native::resize_output(result, result_tmp.sizes());
++  result.copy_(result_tmp);
++}
++
++static Tensor _betaincinv_initial_approx(const Tensor& a, const Tensor& b, const Tensor& y, at::ScalarType& dtype) {
++    /* Computes an initial approximation for `betaincinv(a, b, y)`. */
++  const auto&& [eps, tiny, maxexp] = AT_DISPATCH_FLOATING_TYPES_AND2(
++        at::ScalarType::Half,
++        at::ScalarType::BFloat16,
++        dtype,
++        "_betaincinv_eps_tiny_maxexp",
++        [&]() -> std::tuple<Tensor, Tensor, Tensor> {
++    Tensor eps = at::scalar_tensor(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::epsilon(), y.options());
++    Tensor tiny = at::scalar_tensor(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::min(), y.options()); //min == lowest, tiny == min
++    Tensor maxexp = at::scalar_tensor(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::max_exponent, y.options());
++    return std::make_tuple(std::move(eps), std::move(tiny), std::move(maxexp));
++  });
++  auto options = at::TensorOptions().dtype(dtype).device(y.device());
++  const Tensor two = at::scalar_tensor(2.0, options);
++  const Tensor six = at::scalar_tensor(6.0, options);
++  const Tensor max_log = (maxexp - 1.0) * at::log(two);
++
++  // When min(a, b) >= 1, we use the approximation proposed by [1].
++
++  // Equation 26.5.22 [1, page 945].
++  Tensor yp = - at::special_ndtri(y);
++  Tensor inv_2a_minus_one = at::reciprocal(2.0 * a - 1.0);
++  Tensor inv_2b_minus_one = at::reciprocal(2.0 * b - 1.0);
++  Tensor lmb = (at::square(yp) - 3.0) / 6.0;
++  Tensor h = 2.0 * at::reciprocal(inv_2a_minus_one + inv_2b_minus_one);
++  Tensor w = (yp * at::sqrt(h + lmb) / h -
++          (inv_2b_minus_one - inv_2a_minus_one) *
++          (lmb + 5.0 / six - 2.0 / (3.0 * h)));
++  Tensor result_for_large_a_and_b = a / (a + b * at::exp(2.0 * w));
++
++  /* When min(a, b) < 1 and max(a, b) >= 1, we use the approximation proposed by
++   * [2]. This approximation depends on the following approximation for betainc:
++   *   betainc(a, b, x) ~=
++   *       x ** a / (integral_approx * a) , when x <= mean ,
++   *       (1 - x) ** b / (integral_approx * b) , when x > mean ,
++   * where:
++   *   integral_approx = (mean ** a) / a + (mean_complement ** b) / b ,
++   *   mean = a / (a + b) ,
++   *   mean_complement = 1 - mean = b / (a + b) .
++   *   We invert betainc(a, b, x) with respect to x in the proper regime. */
++
++  // Equation 6.4.7 [2, page 271]
++  Tensor a_plus_b = a + b;
++  Tensor mean = a / a_plus_b;
++  Tensor mean_complement = b / a_plus_b;
++  Tensor integral_approx_part_a = at::exp(at::xlogy(a, mean) - at::log(a));
++  Tensor integral_approx_part_b = at::exp(at::xlogy(b, mean_complement) -
++                                      at::log(b));
++  Tensor integral_approx = integral_approx_part_a + integral_approx_part_b;
++
++  // Solve Equation 6.4.8 [2, page 271] for x in the respective regimes.
++  Tensor inv_a = at::reciprocal(a);
++  Tensor inv_b = at::reciprocal(b);
++  Tensor result_for_small_a_or_b = at::where(
++      y <= (integral_approx_part_a / integral_approx),
++          at::exp(at::xlogy(inv_a, y) + at::xlogy(inv_a, a) +
++                  at::xlogy(inv_a, integral_approx)),
++          -at::expm1(at::special_xlog1py(inv_b, -y) + at::xlogy(inv_b, b) +
++                     at::xlogy(inv_b, integral_approx)));
++
++  /* And when max(a, b) < 1, we use the approximation proposed by [3] for the
++   * same domain:
++   *   betaincinv(a, b, y) ~= xg / (1 + xg) ,
++   * where:
++   *   xg = (a * y * Beta(a, b)) ** (1 / a) . */
++  Tensor log_xg = at::xlogy(inv_a, a) + at::xlogy(inv_a, y) + (
++      inv_a * at::special_betaln(a, b));
++  Tensor xg = at::exp(at::minimum(log_xg, max_log));
++  Tensor result_for_small_a_and_b = xg / (1.0 + xg);
++
++  Tensor result = at::where(
++      at::minimum(a, b) >= 1.0,
++          result_for_large_a_and_b,
++          at::where(at::maximum(a, b) < 1.0,
++              result_for_small_a_and_b,
++              result_for_small_a_or_b));
++
++  return at::clamp(result, tiny, 1.0 - eps);
++}
++
++static Tensor _betaincinv_computation(const Tensor& a, const Tensor& b, const Tensor& y) {
++  at::ScalarType dtype_orig = at::promoteTypes(at::promoteTypes(a.scalar_type(), b.scalar_type()), y.scalar_type());
++  bool should_promote_dtype = ((dtype_orig == at::ScalarType::BFloat16) | (dtype_orig == at::ScalarType::Half)) ? true : false;
++  at::ScalarType dtype = should_promote_dtype ? at::ScalarType::Float : dtype_orig;
++  Tensor _y = y.to(dtype_orig);
++  Tensor _a = a.to(dtype_orig);
++  Tensor _b = b.to(dtype_orig);
++
++  if (should_promote_dtype) {
++    _y = _y.to(dtype);
++    _a = _a.to(dtype);
++    _b = _b.to(dtype);
++  }
++
++  const auto&& [eps, tiny, nan] = AT_DISPATCH_FLOATING_TYPES_AND2(
++        at::ScalarType::Half,
++        at::ScalarType::BFloat16,
++        dtype,
++        "_betaincinv_computation_eps_tiny",
++        [&]() -> std::tuple<Tensor, Tensor, Tensor> {
++    Tensor eps = at::scalar_tensor(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::epsilon(), _y.options());
++    Tensor tiny = at::scalar_tensor(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::min(), _y.options()); //min == lowest, tiny == min
++    Tensor nan = at::scalar_tensor(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::quiet_NaN(), _y.options());
++    return std::make_tuple(std::move(eps), std::move(tiny), std::move(nan));
++  });
++  auto options = at::TensorOptions().dtype(dtype).device(_y.device());
++  const Tensor half = at::scalar_tensor(0.5, options);
++  const Tensor one = at::scalar_tensor(1.0, options);
++  const Tensor halley_correction_min = at::scalar_tensor(0.5, options);
++  const Tensor halley_correction_max = at::scalar_tensor(1.5, options);
++  const Tensor _true = at::scalar_tensor(true, _y.device());
++
++  /* When betainc(0.5, a, b) < y, we apply the symmetry relation given
++   * here: https://dlmf.nist.gov/8.17.E4
++   *   torch.special.betainc(a, b, x) = 1 - torch.special.betainc(b, a, 1 - x) .
++   * If dtype is float32, we have additional conditions to apply this relation:
++   *   (a < 1) & (b < 1) & (torch_special.betainc(a / (a + b), a, b) < y) . */
++  Tensor a_and_b_are_small;
++  Tensor error_at_mean;
++
++  Tensor error_at_half = at::special_betainc(_a, _b, half) - _y;
++  Tensor use_symmetry_relation;
++  if (dtype == at::ScalarType::Float) {
++      a_and_b_are_small = (_a < 1.0) & (_b < 1.0);
++      error_at_mean = at::special_betainc(_a, _b, _a / (_a + _b)) - _y;
++      use_symmetry_relation = (error_at_half < 0.0) & a_and_b_are_small & (
++          error_at_mean < 0.0);
++  } else { // T is double
++      use_symmetry_relation = (error_at_half < 0.0);
++  }
++
++  Tensor a_orig = _a, y_orig = _y;
++  _a = at::where(use_symmetry_relation, _b, _a);
++  _b = at::where(use_symmetry_relation, a_orig, _b);
++  _y = at::where(use_symmetry_relation, 1.0 - _y, _y);
++
++  Tensor a_minus_1 = _a - 1.0;
++  Tensor b_minus_1 = _b - 1.0;
++  Tensor lbeta_a_and_b = at::special_betaln(_a, _b);
++  Tensor two_tiny = 2.0 * tiny;
++
++  // max_iterations was taken from [4] and tolerance was set by experimentation.
++  int max_iterations = 0;
++  Tensor tolerance;
++  if (dtype == at::ScalarType::Float) {
++      max_iterations = 10;
++      tolerance = at::scalar_tensor(8.0, options) * eps;
++  } else { // T is double
++      max_iterations = 8;
++      tolerance = at::scalar_tensor(4096.0, options) * eps;
++  }
++
++  Tensor initial_candidate = _betaincinv_initial_approx(_a, _b, _y, dtype);
++  // Bracket the solution with the interval (low, high).
++  Tensor initial_low = at::zeros_like(_y);
++  Tensor initial_high;
++  if (dtype == at::ScalarType::Float) {
++      initial_high = at::ones_like(_y) * at::where(
++          a_and_b_are_small & (error_at_mean < 0.0), 0.5, 1.0);
++  } else {
++      initial_high = at::ones_like(_y) * 0.5;
++  }
++
++  Tensor should_stop = (_y == initial_low) | (_y == initial_high);
++  Tensor low = initial_low;
++  Tensor high = initial_high;
++  Tensor candidate = initial_candidate;
++
++  // root_finding_iteration
++  for (int i = 0; i < max_iterations; i++) {
++      if (should_stop.all().equal(_true))
++          break;
++      Tensor error = at::special_betainc(_a, _b, candidate) - _y;
++      Tensor error_over_der = error / at::exp(
++          at::xlogy(a_minus_1, candidate) +
++          at::special_xlog1py(b_minus_1, -candidate) -
++          lbeta_a_and_b);
++      Tensor second_der_over_der = a_minus_1 / candidate - b_minus_1 / (1.0 - candidate);
++
++      /* Following [2, section 9.4.2, page 463], we limit the influence of the
++         Halley's correction to the Newton's method, since this correction can
++         reduce the Newton's region of convergence. We set minimum and maximum
++         values for this correction by experimentation. */
++      Tensor halley_correction = at::clamp(1.0 - 0.5 * error_over_der * second_der_over_der,
++                                           halley_correction_min, halley_correction_max);
++      Tensor halley_delta = error_over_der / halley_correction;
++      Tensor halley_candidate = at::where(should_stop, candidate, candidate - halley_delta);
++
++      /* Fall back to bisection if the current step would take the new candidate
++       * out of bounds. */
++      Tensor new_candidate = at::where(
++          halley_candidate <= low,
++              0.5 * (candidate + low),
++              at::where(halley_candidate >= high,
++                  0.5 * (candidate + high),
++                  halley_candidate));
++
++      Tensor new_delta = candidate - new_candidate;
++      Tensor new_delta_is_negative = (new_delta < 0.0);
++      Tensor new_low = at::where(new_delta_is_negative, candidate, low);
++      Tensor new_high = at::where(new_delta_is_negative, high, candidate);
++
++      Tensor adjusted_tolerance = at::maximum(tolerance * new_candidate, two_tiny);
++      should_stop = (should_stop | (at::abs(new_delta) < adjusted_tolerance) |
++                     at::eq(new_low, new_high));
++      low = std::move(new_low);
++      high = std::move(new_high);
++      candidate = std::move(new_candidate);
++  }
++
++  Tensor result = std::move(candidate);
++
++  // If we are taking advantage of the symmetry relation, we have to adjust the
++  // input y and the solution.
++  _y = y_orig;
++  result = at::where(use_symmetry_relation, 1.0 - at::maximum(result, eps), result);
++
++  // Handle trivial cases.
++  result = at::where((at::eq(_y, 0.0) | at::eq(_y, one)), _y, result);
++
++  // Determine if the inputs are out of range (should return NaN output).
++  Tensor result_is_nan = (_a <= 0.0) | (_b <= 0.0) | (_y < 0.0) | (_y > 1.0);
++  result = at::where(result_is_nan, nan, result);
++
++  if (should_promote_dtype)
++    result = result.to(dtype_orig);
++
++  return result;
++}
++
++TORCH_IMPL_FUNC(special_betaincinv_out) (const Tensor& a, const Tensor& b, const Tensor& y, const Tensor& result) {
++  const Tensor&& result_tmp = _betaincinv_computation(a, b, y);
++  at::native::resize_output(result, result_tmp.sizes());
++  result.copy_(result_tmp);
++}
++
++
++static inline std::tuple<Tensor, Tensor> _betainc_even_partial_numerator(
++    const int32_t iteration,
++    const Tensor& a,
++    const Tensor& b,
++    const Tensor& x) {
++  // Even partial numerator used in the continued fraction for betainc.
++  /*
++   * This function computes the partial numerator d_{2m} that is specified
++   * here: https://dlmf.nist.gov/8.17.E23
++   */
++  auto options = at::TensorOptions().dtype(x.dtype()).device(x.device());
++  const Tensor two = at::scalar_tensor(2.0, options);
++  int32_t m = iteration;
++  Tensor a_plus_2m = a + two * m;
++  Tensor a_plus_2m_minus_one = a_plus_2m - 1.0;
++  Tensor denominator = a_plus_2m * a_plus_2m_minus_one;
++
++  Tensor db = m * x / denominator;
++  Tensor value = db * (b - m);
++  Tensor da = -value * (a_plus_2m + a_plus_2m_minus_one) / denominator;
++
++  return std::make_tuple(
++      std::move(value), at::cat({std::move(da), std::move(db)}, -1));
++}
++
++static inline std::tuple<Tensor, Tensor> _betainc_odd_partial_numerator(
++    const int32_t iteration,
++    const Tensor& a,
++    const Tensor& b,
++    const Tensor& x) {
++  // Odd partial numerator used in the continued fraction for betainc.
++  /*
++   * This function computes the partial numerator d_{2m + 1} that is specified
++   * here: https://dlmf.nist.gov/8.17.E23
++   */
++  int32_t m = iteration;
++  Tensor a_plus_m = a + m;
++  Tensor a_plus_2m = a_plus_m + m;
++  Tensor a_plus_2m_plus_one = a_plus_2m + 1.0;
++  Tensor a_plus_b_plus_m = a_plus_m + b;
++  Tensor denominator = a_plus_2m * a_plus_2m_plus_one;
++
++  Tensor db = -a_plus_m * x / denominator;
++  Tensor value = db * a_plus_b_plus_m;
++  Tensor da = -value * ((a_plus_2m + a_plus_2m_plus_one) / denominator) -
++      x * (2.0 * a_plus_m + b) / denominator;
++
++  return std::make_tuple(
++      std::move(value), at::cat({std::move(da), std::move(db)}, -1));
++}
++
++static inline std::tuple<Tensor, Tensor, Tensor> _betainc_modified_lentz_method(
++    const Tensor& a,
++    const Tensor& b,
++    const Tensor& x,
++    const Tensor& use_continued_fraction) {
++  // Returns the continued fraction for betainc by modified Lentz's method.
++  /*
++   * This function implements the method described in the appendix of [1] for
++   * evaluating continued fractions.
++   * [1] Thompson, Ian J., and A. Ross Barnett.
++   *     Coulomb and Bessel functions of complex arguments and order.
++   *     Journal of Computational Physics 64.2 (1986): 490-509.
++   *     https://www.fresco.org.uk/papers/Thompson-JCP64p490.pdf
++   */
++  // a, b, and x have same dtype
++  auto [eps, tiny] = AT_DISPATCH_FLOATING_TYPES_AND2(
++      at::ScalarType::Half,
++      at::ScalarType::BFloat16,
++      x.scalar_type(),
++      "__betainc_modified_lentz_method_eps_tiny",
++      [&]() -> std::tuple<Tensor, Tensor> {
++        Tensor eps = at::scalar_tensor(
++            std::numeric_limits<
++                at::scalar_value_type<scalar_t>::type>::epsilon(),
++            x.options());
++        Tensor tiny = at::scalar_tensor(
++            std::numeric_limits<at::scalar_value_type<scalar_t>::type>::min(),
++            x.options()); // min == lowest, tiny == min
++        return std::make_tuple(std::move(eps), std::move(tiny));
++      });
++
++  const Tensor _true = at::scalar_tensor(true, x.device());
++
++  // max_iterations and tolerance were taken from Cephes.
++  int32_t max_iterations = 100; // at::kFloat
++  Tensor tolerance = eps;
++
++  if (x.scalar_type() == at::kDouble) {
++    max_iterations = 300;
++    tolerance *= 3.0;
++  }
++  Tensor small = at::sqrt(tiny);
++  /* Assume all input Tensors have the same shape. The extra dimension is
++   * needed to compute the gradients with respect to a and b. */
++  const Tensor& _a = a.unsqueeze(-1);
++  const Tensor& _b = b.unsqueeze(-1);
++  const Tensor& _x = x.unsqueeze(-1);
++  const Tensor& _use_continued_fraction = use_continued_fraction.unsqueeze(-1);
++
++  auto __continued_fraction_step =
++      [&](int32_t iteration,
++          const std::vector<Tensor>& values,
++          const std::vector<Tensor>& gradients,
++          const std::function<std::tuple<Tensor, Tensor>(
++              const int32_t, const Tensor&, const Tensor&, const Tensor&)>&
++              partial_numerator_fn)
++      -> std::tuple<std::vector<Tensor>, std::vector<Tensor>, Tensor> {
++    const Tensor& ratio_numerators = values.at(0);
++    const Tensor& ratio_denominators = values.at(1);
++    const Tensor& convergent = values.at(2);
++    const Tensor& dratio_numerators = gradients.at(0);
++    const Tensor& dratio_denominators = gradients.at(1);
++    const Tensor& dconvergent = gradients.at(2);
++    const auto&& [partial_numerator, dpartial_numerator] =
++        partial_numerator_fn(iteration, _a, _b, _x);
++
++    // new_ratio_numerators = C_n = A_n / A_{n - 1}
++    Tensor new_ratio_numerators = 1.0 + partial_numerator / ratio_numerators;
++    new_ratio_numerators = at::where(
++        at::abs(new_ratio_numerators) < small, small, new_ratio_numerators);
++
++    // new_ratio_denominators = D_n = B_{n - 1} / B_n
++    Tensor new_ratio_denominators =
++        1.0 + partial_numerator * ratio_denominators;
++    new_ratio_denominators = at::where(
++        at::abs(new_ratio_denominators) < small, small, new_ratio_denominators);
++    new_ratio_denominators = at::reciprocal(new_ratio_denominators);
++
++    // new_convergent = h_n = A_n / B_n = h_{n - 1} * C_n * D_n;
++    Tensor delta = new_ratio_numerators * new_ratio_denominators;
++    Tensor new_convergent = convergent * delta;
++
++    Tensor new_dratio_numerators =
++        (dpartial_numerator * ratio_numerators -
++         partial_numerator * dratio_numerators);
++    new_dratio_numerators =
++        new_dratio_numerators / at::square(ratio_numerators);
++    Tensor new_dratio_denominators =
++        (dpartial_numerator * ratio_denominators +
++         partial_numerator * dratio_denominators);
++    new_dratio_denominators =
++        -new_dratio_denominators * at::square(new_ratio_denominators);
++
++    Tensor new_dconvergent = dconvergent * delta +
++        (convergent * new_dratio_numerators * new_ratio_denominators);
++    new_dconvergent = new_dconvergent +
++        (convergent * new_dratio_denominators * new_ratio_numerators);
++
++    std::vector<Tensor> new_values = {
++        std::move(new_ratio_numerators),
++        std::move(new_ratio_denominators),
++        std::move(new_convergent)};
++    std::vector<Tensor> new_gradients = {
++        std::move(new_dratio_numerators),
++        std::move(new_dratio_denominators),
++        std::move(new_dconvergent)};
++
++    return std::make_tuple(
++        std::move(new_values), std::move(new_gradients), std::move(delta));
++  };
++
++  auto __continued_fraction_evaluation =
++      [&](const Tensor& should_stop,
++          int32_t iteration,
++          const std::vector<Tensor>& values,
++          const std::vector<Tensor>& gradients)
++      -> std::tuple<Tensor, int32_t, std::vector<Tensor>, std::vector<Tensor>> {
++    // We run two steps of modified Lentz's method per iteration.
++    // First step of the iteration: the even one.
++    auto [_new_values, _new_gradients, _delta] = __continued_fraction_step(
++        iteration, values, gradients, _betainc_even_partial_numerator);
++
++    // Second step of the iteration: the odd one.
++    auto [new_values, new_gradients, delta] = __continued_fraction_step(
++        iteration, _new_values, _new_gradients, _betainc_odd_partial_numerator);
++    Tensor stop = should_stop | (at::abs(delta - 1.0) < tolerance);
++    return std::make_tuple(
++        std::move(stop),
++        iteration + 1,
++        std::move(new_values),
++        std::move(new_gradients));
++  };
++
++  Tensor apb = _a + _b;
++  Tensor ap1 = _a + 1.0;
++  // Initialization and first step of modified Lentz's method.
++  Tensor initial_ratio_numerators = at::ones_like(_x);
++  Tensor initial_ratio_denominators = 1.0 - apb * _x / ap1;
++  initial_ratio_denominators = at::where(
++      at::abs(initial_ratio_denominators) < small,
++      small,
++      initial_ratio_denominators);
++  initial_ratio_denominators = at::reciprocal(initial_ratio_denominators);
++  Tensor initial_convergent = initial_ratio_denominators;
++  std::vector<Tensor> values = {
++      std::move(initial_ratio_numerators),
++      std::move(initial_ratio_denominators),
++      std::move(initial_convergent)};
++
++  Tensor initial_dratio_denominators =
++      at::cat({1.0 - _b, ap1}, -1) * _x / at::square(_x * apb - ap1);
++  Tensor initial_dratio_numerators =
++      at::zeros_like(initial_dratio_denominators);
++  Tensor initial_dconvergent = initial_dratio_denominators;
++  std::vector<Tensor> gradients = {
++      std::move(initial_dratio_numerators),
++      std::move(initial_dratio_denominators),
++      std::move(initial_dconvergent)};
++
++  Tensor stop = ~_use_continued_fraction;
++
++  for (int32_t i = 0; i < max_iterations; i++) {
++    std::tuple<Tensor, int32_t, std::vector<Tensor>, std::vector<Tensor>> ret =
++        __continued_fraction_evaluation(stop, i + 1, values, gradients);
++    stop = std::get<0>(ret);
++    values = std::get<2>(ret);
++    gradients = std::get<3>(ret);
++    if (stop.all().equal(_true)) // TODO: It can be bottleneck..
++      break;
++  }
++
++  // Remove the previously added extra dimension: it is no longer needed.
++  Tensor convergent = values.back().squeeze(-1);
++  std::vector<Tensor> convergent_grads = at::unbind(gradients.back(), -1);
++
++  return std::make_tuple(
++      std::move(convergent),
++      std::move(convergent_grads.at(0)),
++      std::move(convergent_grads.at(1)));
++}
++
++static inline std::tuple<Tensor, Tensor> _betainc_der_continued_fraction(
++    const Tensor& a,
++    const Tensor& b,
++    const Tensor& x,
++    const Tensor& use_continued_fraction) {
++  // Returns the partial derivatives of betainc with respect to a and b.
++  /*
++   * This function evaluates betainc(a, b, x) by its continued fraction
++   * expansion given here: https://dlmf.nist.gov/8.17.E22
++   * We apply this function when the input (a, b, x) does not belong to the
++   * proper region of computation of `_betainc_der_power_series`.
++   */
++
++  /* This continued fraction expansion of betainc converges rapidly
++   * for x < (a - 1) / (a + b - 2). For x >= (a - 1) / (a + b - 2),
++   * we can obtain an equivalent computation by using the symmetry
++   * relation given here: https://dlmf.nist.gov/8.17.E4
++   *   betainc(a, b, x) = 1 - betainc(b, a, 1 - x) */
++  Tensor use_symmetry_relation = (x >= (a - 1.0) / (a + b - 2.0));
++  const Tensor& _a = at::where(use_symmetry_relation, b, a);
++  const Tensor& _b = at::where(use_symmetry_relation, a, b);
++  const Tensor& _x = at::where(use_symmetry_relation, 1.0 - x, x);
++
++  const auto&& [cf, cf_grad_a, cf_grad_b] =
++      _betainc_modified_lentz_method(_a, _b, _x, use_continued_fraction);
++
++  Tensor normalization = at::exp(
++      at::xlogy(_a, _x) + at::special_xlog1py(_b, -_x) - at::log(_a) -
++      at::special_betaln(_a, _b));
++  Tensor digamma_apb = at::special_digamma(_a + _b);
++  Tensor grad_a = normalization *
++      (cf_grad_a +
++       cf * (at::log(_x) - at::reciprocal(_a) + digamma_apb - at::digamma(_a)));
++  Tensor grad_b = normalization *
++      (cf_grad_b + cf * (at::log1p(-_x) + digamma_apb - at::digamma(_b)));
++
++  Tensor grad_a_orig = grad_a;
++  grad_a = at::where(use_symmetry_relation, -grad_b, grad_a);
++  grad_b = at::where(use_symmetry_relation, -grad_a_orig, grad_b);
++
++  return std::make_tuple(std::move(grad_a), std::move(grad_b));
++}
++
++static inline std::tuple<Tensor, Tensor> _betainc_der_power_series(
++    const Tensor& a,
++    const Tensor& b,
++    const Tensor& x,
++    const Tensor& use_power_series) {
++  // Returns the partial derivatives of betainc with respect to a and b.
++  /*
++   * This function evaluates betainc(a, b, x) by its series representation:
++   *   x ** a * 2F1(a, 1 - b; a + 1; x) / (a * B(a, b)) ,
++   * where 2F1 is the Gaussian hypergeometric function.
++   * We apply this function when the input (a, b, x) satisfies at least one
++   * of the following conditions:
++   *   C1: (x < a / (a + b)) & (b * x <= 1) & (x <= 0.95)
++   *   C2: (x >= a / (a + b)) & (a * (1 - x) <= 1) & (x >= 0.05)
++   */
++  // a, b and x have same dtype.
++  const Tensor eps = AT_DISPATCH_FLOATING_TYPES_AND2(
++      at::ScalarType::Half,
++      at::ScalarType::BFloat16,
++      x.scalar_type(),
++      "__betainc_der_power_series_eps",
++      [&]() -> Tensor {
++        return at::scalar_tensor(
++            std::numeric_limits<
++                at::scalar_value_type<scalar_t>::type>::epsilon(),
++            x.options());
++      });
++  auto options = at::TensorOptions().dtype(x.dtype()).device(x.device());
++  const Tensor one = at::scalar_tensor(1.0, options);
++  const Tensor half = at::scalar_tensor(0.5, options);
++  const Tensor _true = at::scalar_tensor(true, x.device());
++
++  // Avoid returning NaN or infinity when the input does not satisfy either C1
++  // or C2.
++  Tensor safe_a = at::where(use_power_series, a, half);
++  Tensor safe_b = at::where(use_power_series, b, half);
++  Tensor safe_x = at::where(use_power_series, x, half);
++
++  /* When x >= a / (a + b), we must apply the symmetry relation given here:
++   * https://dlmf.nist.gov/8.17.E4
++   *   betainc(a, b, x) = 1 - betainc(b, a, 1 - x) */
++  Tensor use_symmetry_relation = (safe_x >= safe_a / (safe_a + safe_b));
++  Tensor safe_a_orig = safe_a;
++
++  safe_a = at::where(use_symmetry_relation, safe_b, safe_a);
++  safe_b = at::where(use_symmetry_relation, safe_a_orig, safe_b);
++  safe_x = at::where(use_symmetry_relation, 1.0 - safe_x, safe_x);
++  // max_iterations was set by experimentation and tolerance was taken from
++  // Cephes.
++  int32_t max_iterations = 300; // at::kFloat
++
++  if (x.scalar_type() == at::kDouble) {
++    max_iterations = 600;
++  }
++
++  Tensor tolerance = eps / safe_a;
++  /* Evaluate the series that defines the following expression:
++   *   2F1(a, 1 - b; a + 1; x) / a */
++  auto __power_series_evaluation = [&](const Tensor& should_stop,
++                                       const std::vector<Tensor>& values,
++                                       const std::vector<Tensor>& gradients)
++      -> std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> {
++    const Tensor& n = values.at(0);
++    const Tensor& product = values.at(1);
++    const Tensor& series_sum = values.at(2);
++    const Tensor& product_grad_b = gradients.at(0);
++    const Tensor& da = gradients.at(1);
++    const Tensor& db = gradients.at(2);
++
++    Tensor x_div_n = safe_x / n;
++    Tensor factor = (n - safe_b) * x_div_n;
++    Tensor apn = safe_a + n;
++
++    Tensor new_product = product * factor;
++    Tensor term = new_product / apn;
++    Tensor new_product_grad_b = factor * product_grad_b - product * x_div_n;
++    Tensor new_da = da - new_product / at::square(apn);
++    Tensor new_db = db + new_product_grad_b / apn;
++
++    Tensor stop = should_stop | (at::abs(term) <= tolerance);
++    std::vector<Tensor> new_values = {
++        n + 1.0, std::move(new_product), series_sum + term};
++    std::vector<Tensor> new_gradients = {
++        std::move(new_product_grad_b), std::move(new_da), std::move(new_db)};
++
++    return std::make_tuple(
++        std::move(stop), std::move(new_values), std::move(new_gradients));
++  };
++
++  Tensor initial_n = one;
++  Tensor initial_product = at::ones_like(safe_a);
++  Tensor initial_series_sum = one / safe_a;
++  std::vector<Tensor> values = {
++      std::move(initial_n),
++      std::move(initial_product),
++      std::move(initial_series_sum)};
++
++  Tensor initial_product_grad_b = at::zeros_like(safe_b);
++  Tensor initial_da = -at::reciprocal(at::square(safe_a));
++  Tensor initial_db = initial_product_grad_b;
++  std::vector<Tensor> gradients = {
++      std::move(initial_product_grad_b),
++      std::move(initial_da),
++      std::move(initial_db)};
++
++  Tensor stop = ~use_power_series;
++
++  for (int32_t i = 0; i < max_iterations; i++) {
++    std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> ret =
++        __power_series_evaluation(stop, values, gradients);
++    stop = std::get<0>(ret);
++    values = std::get<1>(ret);
++    gradients = std::get<2>(ret);
++    if (stop.all().equal(_true)) // TODO: It can be bottleneck..
++      break;
++  }
++
++  const Tensor& series_sum = values.back();
++  const Tensor& series_grad_a = gradients.at(1);
++  const Tensor& series_grad_b = gradients.at(2);
++
++  Tensor normalization =
++      at::exp(at::xlogy(safe_a, safe_x) - at::special_betaln(safe_a, safe_b));
++  Tensor digamma_apb = at::digamma(safe_a + safe_b);
++  Tensor grad_a = normalization *
++      (series_grad_a +
++       series_sum * (digamma_apb - at::digamma(safe_a) + at::log(safe_x)));
++  Tensor grad_b = normalization *
++      (series_grad_b + series_sum * (digamma_apb - at::digamma(safe_b)));
++
++  Tensor grad_a_orig = grad_a;
++  grad_a = at::where(use_symmetry_relation, -grad_b, grad_a);
++  grad_b = at::where(use_symmetry_relation, -grad_a_orig, grad_b);
++
++  return std::make_tuple(std::move(grad_a), std::move(grad_b));
++}
++
++static inline std::tuple<Tensor, Tensor, Tensor> _betainc_partials(
++    const Tensor& a,
++    const Tensor& b,
++    const Tensor& x) {
++  // Reference: https://github.com/tensorflow/probability/blob/
++  // b14ae1d79de4a52d834a3ba2dc88f7e5d849e6c7/tensorflow_probability/python/math/special.py#L432-L491
++  at::ScalarType dtype_origin = at::promoteTypes(
++      at::promoteTypes(a.scalar_type(), b.scalar_type()), x.scalar_type());
++  /* We promote bfloat16 and float16 to float32 to make this function consistent
++   * with betainc */
++  bool should_promote_dtype = ((dtype_origin == at::ScalarType::BFloat16) |
++                               (dtype_origin == at::ScalarType::Half))
++      ? true
++      : false;
++  at::ScalarType dtype =
++      should_promote_dtype ? at::ScalarType::Float : dtype_origin;
++
++  const Tensor& _a = a.to(dtype);
++  const Tensor& _b = b.to(dtype);
++  const Tensor& _x = x.to(dtype);
++
++  /* The partial derivative of betainc with respect to x can be obtained
++   * directly by using the expression given here:
++   * http://functions.wolfram.com/06.21.20.0001.01 */
++  Tensor grad_x = at::exp(
++      at::xlogy(_a - 1.0, _x) + at::special_xlog1py(_b - 1.0, -_x) -
++      at::special_betaln(_a, _b));
++
++  /* The partial derivatives of betainc with respect to a and b are computed
++   * by using forward mode. */
++  Tensor use_power_series =
++      (((_x < _a / (_a + _b)) & (_b * _x <= 1.0) & (_x <= 0.95)) |
++       ((_x >= _a / (_a + _b)) & (_a * (1.0 - _x) <= 1.0) & (_x >= 0.05)));
++  const auto&& [ps_grad_a, ps_grad_b] =
++      _betainc_der_power_series(_a, _b, _x, use_power_series);
++
++  const auto&& [cf_grad_a, cf_grad_b] =
++      _betainc_der_continued_fraction(_a, _b, _x, ~use_power_series);
++
++  Tensor grad_a = at::where(use_power_series, ps_grad_a, cf_grad_a);
++  Tensor grad_b = at::where(use_power_series, ps_grad_b, cf_grad_b);
++
++  /* According to the code accompanying [1], grad_a = grad_b = 0 when x is
++   * equal to 0 or 1.
++   * [1] R. Boik, J. Robinson-Cox,
++   *    Derivatives of the Incomplete Beta Function
++   *    https://www.jstatsoft.org/article/view/v003i01/beta.der.pdf */
++  Tensor grads_a_and_b_should_be_zero = (_x == 0.0) | (_x == 1.0);
++
++  grad_a = at::where(grads_a_and_b_should_be_zero, 0.0, grad_a);
++  grad_b = at::where(grads_a_and_b_should_be_zero, 0.0, grad_b);
++
++  // Determine if the inputs are out of range (should return NaN output).
++  Tensor result_is_nan = (a <= 0.0) | (b <= 0.0) | (x < 0.0) | (x > 1.0);
++  const Tensor nan = AT_DISPATCH_FLOATING_TYPES_AND2(
++      at::ScalarType::Half,
++      at::ScalarType::BFloat16,
++      x.scalar_type(),
++      "__betainc_partials_nan",
++      [&]() -> Tensor {
++        return at::scalar_tensor(
++            std::numeric_limits<
++                at::scalar_value_type<scalar_t>::type>::quiet_NaN(),
++            x.options());
++      });
++
++  grad_a = at::where(result_is_nan, nan, grad_a);
++  grad_b = at::where(result_is_nan, nan, grad_b);
++  grad_x = at::where(result_is_nan, nan, grad_x);
++
++  /* If we promoted the dtype, then we have to convert the gradients back to the
++   * original dtype. */
++  if (should_promote_dtype) {
++    grad_a = grad_a.to(dtype_origin);
++    grad_b = grad_b.to(dtype_origin);
++    grad_x = grad_x.to(dtype_origin);
++  }
++  return std::make_tuple(
++      std::move(grad_a), std::move(grad_b), std::move(grad_x));
++}
++
++std::tuple<Tensor, Tensor, Tensor> _special_betainc_partials(
++    const Tensor& a,
++    const Tensor& b,
++    const Tensor& x) {
++  return _betainc_partials(a, b, x);
++}
++
++static inline std::tuple<Tensor, Tensor, Tensor> _betaincinv_partials(
++    const Tensor& a,
++    const Tensor& b,
++    const Tensor& y) {
++  at::ScalarType dtype_orig = at::promoteTypes(
++      at::promoteTypes(a.scalar_type(), b.scalar_type()), y.scalar_type());
++  bool should_promote_dtype = ((dtype_orig == at::ScalarType::BFloat16) |
++                               (dtype_orig == at::ScalarType::Half))
++      ? true
++      : false;
++  at::ScalarType dtype =
++      should_promote_dtype ? at::ScalarType::Float : dtype_orig;
++  Tensor _y = y.to(dtype_orig);
++  Tensor _a = a.to(dtype_orig);
++  Tensor _b = b.to(dtype_orig);
++
++  if (should_promote_dtype) {
++    _y = _y.to(dtype);
++    _a = _a.to(dtype);
++    _b = _b.to(dtype);
++  }
++
++  Tensor _x = at::special_betaincinv(_a, _b, _y);
++  auto [g_a, g_b, g_x] = _betainc_partials(_a, _b, _x);
++  g_a = -g_a / g_x;
++  g_b = -g_b / g_x;
++  Tensor g_y = at::reciprocal(g_x);
++
++  if (should_promote_dtype) {
++    g_a = g_a.to(dtype_orig);
++    g_b = g_b.to(dtype_orig);
++    g_y = g_y.to(dtype_orig);
++  }
++
++  return std::make_tuple(std::move(g_a), std::move(g_b), std::move(g_y));
++}
++
++std::tuple<Tensor, Tensor, Tensor> _special_betaincinv_partials(
++    const Tensor& a,
++    const Tensor& b,
++    const Tensor& y) {
++  return _betaincinv_partials(a, b, y);
++}
++
++
++std::tuple<Tensor, Tensor, Tensor> _special_betainc_partials_meta(
++    const Tensor& a,
++    const Tensor& b,
++    const Tensor& x) {
++  at::ScalarType dtype_orig = at::promoteTypes(
++      at::promoteTypes(a.scalar_type(), b.scalar_type()), x.scalar_type());
++  auto vec = at::broadcast_tensors({a, b, x});
++
++  return std::make_tuple(at::empty_like(vec.at(0), at::MemoryFormat::Contiguous).to(dtype_orig),
++      at::empty_like(vec.at(1), at::MemoryFormat::Contiguous).to(dtype_orig),
++      at::empty_like(vec.at(2), at::MemoryFormat::Contiguous).to(dtype_orig));
++}
++
++
++std::tuple<Tensor, Tensor, Tensor> _special_betaincinv_partials_meta(
++    const Tensor& a,
++    const Tensor& b,
++    const Tensor& y) {
++  at::ScalarType dtype_orig = at::promoteTypes(
++      at::promoteTypes(a.scalar_type(), b.scalar_type()), y.scalar_type());
++
++  auto vec = at::broadcast_tensors({a, b, y});
++
++  return std::make_tuple(at::empty_like(vec.at(0), at::MemoryFormat::Contiguous).to(dtype_orig),
++      at::empty_like(vec.at(1), at::MemoryFormat::Contiguous).to(dtype_orig),
++      at::empty_like(vec.at(2), at::MemoryFormat::Contiguous).to(dtype_orig));
++
++}
++
++
++} // namespace at::native
+diff --git a/aten/src/ATen/native/BetaOps.h b/aten/src/ATen/native/BetaOps.h
+new file mode 100644
+index 0000000000..930d349331
+--- /dev/null
++++ b/aten/src/ATen/native/BetaOps.h
+@@ -0,0 +1,17 @@
++#pragma once
++
++#include <ATen/core/TensorBase.h>
++#include <ATen/native/DispatchStub.h>
++
++namespace at {
++struct TensorIterator;
++struct TensorIteratorBase;
++}
++
++namespace at::native {
++
++using structured_beta_fn = void(*)(TensorIteratorBase&);
++
++DECLARE_DISPATCH(structured_beta_fn, betainc_stub)
++
++} // namespace at::native
+diff --git a/aten/src/ATen/native/cpu/BetaOpsKernel.cpp b/aten/src/ATen/native/cpu/BetaOpsKernel.cpp
+new file mode 100644
+index 0000000000..992aff677c
+--- /dev/null
++++ b/aten/src/ATen/native/cpu/BetaOpsKernel.cpp
+@@ -0,0 +1,26 @@
++#define TORCH_ASSERT_NO_OPERATORS
++#include <ATen/native/BetaOps.h>
++
++#include <ATen/Dispatch.h>
++#include <ATen/native/Math.h>
++#include <ATen/native/TensorIterator.h>
++#include <ATen/native/cpu/Loops.h>
++#include <c10/util/TypeSafeSignMath.h>
++
++namespace at::native {
++
++namespace {
++
++void betainc_kernel(TensorIteratorBase& iter) {
++  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "betainc_cpu", [&]() {
++    cpu_kernel(iter, [](scalar_t a, scalar_t b, scalar_t x) -> scalar_t {
++        return calc_betainc(a, b, x);
++    });
++  });
++}
++
++} // namespace
++
++REGISTER_DISPATCH(betainc_stub, &betainc_kernel)
++
++} // namespace at::native
+diff --git a/aten/src/ATen/native/cuda/BetaOpsKernel.cu b/aten/src/ATen/native/cuda/BetaOpsKernel.cu
+new file mode 100644
+index 0000000000..1fa26e08b3
+--- /dev/null
++++ b/aten/src/ATen/native/cuda/BetaOpsKernel.cu
+@@ -0,0 +1,21 @@
++#define TORCH_ASSERT_NO_OPERATORS
++#include <ATen/Dispatch.h>
++#include <ATen/native/DispatchStub.h>
++#include <ATen/native/cuda/Loops.cuh>
++#include <ATen/native/TensorIterator.h>
++#include <ATen/native/BetaOps.h>
++#include <ATen/native/Math.h>
++
++namespace at::native {
++
++void betainc_kernel_cuda(TensorIteratorBase& iter) {
++  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "betainc_cuda", [&]() {
++    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t x) -> scalar_t {
++        return calc_betainc(a, b, x);
++    });
++  });
++}
++
++REGISTER_DISPATCH(betainc_stub, &betainc_kernel_cuda)
++
++} // namespace at::native
