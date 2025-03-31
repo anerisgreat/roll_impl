@@ -28,6 +28,7 @@ def roll_loss_from_fpr(fpr):
 
 def roll_beta_loss_from_fpr(fpr):
     def _partial(yh, y):
+        # yh = torch.nn.functional.sigmoid(yh)
         yh = torch.nn.functional.sigmoid(yh)
         true_yh, false_yh = split_true_false(yh, y)
         true_beta = Beta.from_sample(true_yh)

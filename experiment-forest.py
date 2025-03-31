@@ -33,15 +33,15 @@ device = torch.device('cpu')
 dataset = ForestCoverDataset()
 
 configurations = [
-    ExperimentConfiguration(
-        name = 'BCE',
-        model_creator_func = MyNet,
-        data_splitter = basic_data_splitter,
-        optim_class = torch.optim.SGD,
-        optim_args = {'lr' : 0.1},
-        criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), 100),
-        n_episodes = 5
-    )] + [
+    # ExperimentConfiguration(
+    #     name = 'BCE',
+    #     model_creator_func = MyNet,
+    #     data_splitter = basic_data_splitter,
+    #     optim_class = torch.optim.SGD,
+    #     optim_args = {'lr' : 0.1},
+    #     criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), 100),
+    #     n_episodes = 5
+    # )] + [
             ExperimentConfiguration(
             name = f'roll-beta-{rr:0.2f}',
             model_creator_func = MyNet,
@@ -51,7 +51,7 @@ configurations = [
             criteriorator = CRBasedCriteriorator(
                 roll_beta_loss_from_fpr(rr), 100, [rr]),
             n_episodes = 5) \
-        for rr in [0.30, 0.40]
+        for rr in [0.05, 0.025]
     ]
 
 logging.info('Starting experiment!')
