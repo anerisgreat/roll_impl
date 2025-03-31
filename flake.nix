@@ -27,6 +27,25 @@
                 patches =
                   (o.patches or []) ++ [./nccl-version-patch.patch];
               });
+              torchvision = python-prev.torchvision.overridePythonAttrs (o: {
+                dependencies = [
+                    python-prev.numpy
+                    python-prev.pillow
+                    python-final.pytorch
+                    python-prev.scipy
+                ];
+                buildInputs = [
+                    pkgs.libjpeg_turbo
+                    pkgs.libpng
+                    python-final.pytorch.cxxdev
+                ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
+                    # This should match the SDK used by `torch` above
+                    pkgs.apple-sdk_13
+
+                    # error: unknown type name 'MPSGraphCompilationDescriptor'; did you mean 'MPSGraphExecutionDescriptor'?
+                    # https://developer.apple.com/documentation/metalperformanceshadersgraph/mpsgraphcompilationdescriptor/
+                    (pkgs.darwinMinVersionHook "12.0")];
+              });
             };
           };
         })
@@ -48,18 +67,21 @@
                     matplotlib
                     pandas
                     plotly
-                    # torchvision
-                    # ( buildPythonPackage rec {
-                    #     pname = "adult_dataset";
-                    #     version = "3.0.0";
-                    #     src = fetchPypi {
-                    #         inherit pname version;
-                    #         sha256 = "sha256-/xgipMO3yPqeG+m/kFXzchJ+t51oExq8cWcBeulPMeA=";
-                    #     };
+                    torchvision
+                    ( buildPythonPackage rec {
+                        pname = "adult_dataset";
+                        version = "3.0.0";
+                        src = fetchPypi {
+                            inherit pname version;
+                            sha256 = "sha256-/xgipMO3yPqeG+m/kFXzchJ+t51oExq8cWcBeulPMeA=";
+                        };
 
-                    #     propagatedBuildInputs = [flit torch numpy pandas];
-                    #     format="pyproject";
-                    # })
+                        propagatedBuildInputs = [flit pytorch numpy pandas];
+                        format="pyproject";
+                        patches =
+                            (o.patches or []) ++ [./adult-dataset-numpy-version.patch];
+
+                    })
                 ]))];
         };
     };

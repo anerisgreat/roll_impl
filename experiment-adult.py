@@ -14,9 +14,9 @@ from src.datasets import AdultDataset
 from src.utils import init_experiment
 from src.roll import roll_loss_from_fpr, roll_beta_loss_from_fpr
 
-run_dir = init_experiment('results', 'adult')
+run_dir = init_experiment('results', 'adult', console_level = logging.DEBUG)
 
-MAX_ITERS = 10
+MAX_ITERS = 100
 N_EPISODES = 5
 
 class MyNet(nn.Module):
@@ -25,7 +25,7 @@ class MyNet(nn.Module):
         layers = \
             [nn.Linear(104, 20), nn.ReLU()] + \
             [ x for y in [ \
-                    [nn.Linear(20, 20), nn.ReLU()] for _ in range(1)]
+                    [nn.Linear(20, 20), nn.ReLU()] for _ in range(3)]
                 for x in y] + \
             [nn.Linear(20, 1)]
         self._layers = nn.Sequential(
@@ -35,16 +35,7 @@ class MyNet(nn.Module):
         return self._layers(x).squeeze()
 
 device = torch.device('cpu')
-configurations = [
-    # ExperimentConfiguration(
-    #     name = 'BCE',
-    #     model_creator_func = MyNet,
-    #     data_splitter = basic_data_splitter,
-    #     optim_class = torch.optim.Adam,
-    #     optim_args = {'lr' : 0.1},
-    #     criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), MAX_ITERS),
-    #     n_episodes = N_EPISODES),
-    ] + [ ExperimentConfiguration(
+configurations = [ ExperimentConfiguration(
             name = f'beta-roll-{rr:0.2f}',
             model_creator_func = MyNet,
             data_splitter = partial(basic_data_splitter, is_oneshot = True),
@@ -53,7 +44,16 @@ configurations = [
             criteriorator = CRBasedCriteriorator(
                 roll_beta_loss_from_fpr(rr), MAX_ITERS, [rr]),
             n_episodes = N_EPISODES) \
-        for rr in [0.05, 0.1, 0.2, 0.3, 0.4, 0.5]
+        for rr in [0.05, 0.1, 0.2]
+    ] + [
+    ExperimentConfiguration(
+        name = 'BCE',
+        model_creator_func = MyNet,
+        data_splitter = basic_data_splitter,
+        optim_class = torch.optim.SGD,
+        optim_args = {'lr' : 0.1},
+        criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), MAX_ITERS),
+        n_episodes = N_EPISODES),
     ]
 
 logging.info('Starting experiment!')

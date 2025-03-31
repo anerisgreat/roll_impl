@@ -4,11 +4,11 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler, PowerTransformer
 
 #for Adult
-# from adult import Adult
+from adult import Adult
 
 import torch
-# import torchvision
-# import torchvision.transforms as transforms
+import torchvision
+import torchvision.transforms as transforms
 
 class ForestCoverDataset:
     def __init__(self):
@@ -30,35 +30,34 @@ class ForestCoverDataset:
     def __len__(self):
         return len(self.x)
 
-# class Cifar10Dataset:
-#     def __init__(self):
-#         PATH = '/home/aner/.data/cifar10'
-#         self._transform = transforms.Compose(
-#             [transforms.ToTensor(),
-#             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+class Cifar10Dataset:
+    def __init__(self):
+        PATH = '/home/aner/.data/cifar10'
+        self._transform = transforms.Compose(
+            [transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-#         self._dset = torchvision.datasets.CIFAR10(
-#             root=PATH, train=True, download=True, transform=self._transform)
-#         self.y = torch.tensor(torch.tensor(self._dset.targets) == 1, dtype = torch.float64)
+        self._dset = torchvision.datasets.CIFAR10(
+            root=PATH, train=True, download=True, transform=self._transform)
+        self.y = torch.tensor(torch.tensor(self._dset.targets) == 1, dtype = torch.float64)
 
-#     def __getitem__(self, i):
-#         x = self._dset.data[i]
-#         x = torch.tensor(x / 255, dtype = torch.float32)
-#         x = torch.movedim(x, -1, -3)
-#         return x, self.y[i]
-
-
-#         # if(type(i) == int):
-#         #     return self._dset.data[i], self.y[i]
-#         # if(len(i.shape) > 0):
-#         #     x, __= list(zip(*[self._dset.data[j] for j in i]))
-#         #     return torch.stack(x, 0), self.y[i]
-#         # else:
-#         #     return self._dset.data[i], self.y[i]
+    def __getitem__(self, i):
+        x = self._dset.data[i]
+        x = torch.tensor(x / 255, dtype = torch.float32)
+        x = torch.movedim(x, -1, -3)
+        return x, self.y[i]
 
 
-#     def __len__(self):
-#         return len(self._dset)
+        # if(type(i) == int):
+        #     return self._dset.data[i], self.y[i]
+        # if(len(i.shape) > 0):
+        #     x, __= list(zip(*[self._dset.data[j] for j in i]))
+        #     return torch.stack(x, 0), self.y[i]
+        # else:
+        #     return self._dset.data[i], self.y[i]
+
+    def __len__(self):
+        return len(self._dset)
 
 class TestGaussianDataset:
     def __init__(self,
