@@ -48,7 +48,7 @@
                     matplotlib
                     pandas
                     plotly
-                    torchvision
+                    # torchvision
                     # ( buildPythonPackage rec {
                     #     pname = "adult_dataset";
                     #     version = "3.0.0";
