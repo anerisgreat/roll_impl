@@ -3,6 +3,7 @@ from logging import config as loggingconfig
 import logging
 import datetime
 from functools import partial
+import torch.multiprocessing as mp
 
 def joinmakedir(a, b):
     newp = os.path.join(a, b)
@@ -52,6 +53,7 @@ def logging_get_default_config(
         return base_dict
 
 def init_experiment(base_dir, experiment_name, console_level = logging.INFO):
+    mp.set_start_method('spawn')
     experiment_dir = joinmakedir(base_dir, experiment_name)
     run_dir = joinmakedir(
         experiment_dir,

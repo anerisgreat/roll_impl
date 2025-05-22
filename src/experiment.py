@@ -8,7 +8,7 @@ from typing import Dict, Any
 import logging
 from sklearn.metrics import roc_curve
 from functools import partial
-import multiprocessing as mp
+import torch.multiprocessing as mp
 import time
 from scipy.stats import beta
 
@@ -129,10 +129,11 @@ class CRBasedCriteriorator(Criteriorator):
                         get_tpr_at_fprs(yh, y, self._fprs)))
         tfrs = dict(zip([f'tfr@{fpr:0.2f}' for fpr in self._fprs],
                         [1 - x for x in get_tpr_at_fprs(yh, y, self._fprs)]))
-        beta_tfrs = dict(zip([f'beta-tfr@{fpr:0.2f}' for fpr in self._fprs],
-                        [x for x in get_beta_fpr_at_fprs(yh, y, self._fprs)]))
+        # beta_tfrs = dict(zip([f'beta-tfr@{fpr:0.2f}' for fpr in self._fprs],
+        #                 [x for x in get_beta_fpr_at_fprs(yh, y, self._fprs)]))
 
-        ret_df = pd.DataFrame({**ret, **tprs, **tfrs, **beta_tfrs})
+        # ret_df = pd.DataFrame({**ret, **tprs, **tfrs, **beta_tfrs})
+        ret_df = pd.DataFrame({**ret, **tprs, **tfrs})
         logging.debug(ret_df)
         return ret_df
 
@@ -231,27 +232,56 @@ class ExperimentDataLoader:
         self._is_oneshot = is_oneshot
         self._is_shuffle = is_shuffle
 
-        self._true_indeces = torch.argwhere(self._dset[self._indeces][1])
+        self._true_indeces = torch.argwhere(
+                self._dset[self._indeces][1]
+            ).flatten()
         self._false_indeces = torch.argwhere(
-            torch.logical_not(self._dset[self._indeces][1]))
+                torch.logical_not(self._dset[self._indeces][1])
+            ).flatten()
 
     def __iter__(self):
         if(self._is_oneshot):
             yield self._dset[self._indeces]
+
             return StopIteration
 
         if(self._is_shuffle):
             self._indeces = self._indeces[torch.randperm(len(self._indeces))]
-            self._true_indeces = torch.argwhere(self._dset[self._indeces][1])
+            self._true_indeces = torch.argwhere(self._dset[self._indeces][1]).flatten()
             self._false_indeces = torch.argwhere(
-                torch.logical_not(self._dset[self._indeces][1]))
+                torch.logical_not(self._dset[self._indeces][1])).flatten()
 
         self._true_index = 0
         self._false_index = 0
         self._index = 0
 
         if(self._is_balanced):
-            return NotImplemented
+            n_true = len(self._true_indeces)
+            n_false = len(self._false_indeces)
+            n_true_per_batch = int((n_true / (n_true + n_false)) * self._batch_size)
+            n_false_per_batch = self._batch_size - n_true_per_batch
+
+            while(self._true_index <= n_true - n_true_per_batch and \
+                  self._false_index <= n_false - n_false_per_batch):
+                false_Xs, false_Ys = self._dset[self._false_indeces[self._false_index:self._false_index + n_false_per_batch]]
+                # false_Xs, false_Ys = zip(*[self._dset[self._false_indeces[j]] \
+                #            for j in range(self._false_index,
+                #                           self._false_index + n_false_per_batch) \
+                #            if not j >= len(self._false_indeces)])
+                self._false_index += n_false_per_batch
+
+                
+                true_Xs, true_Ys = self._dset[self._true_indeces[self._true_index:self._true_index + n_true_per_batch]]
+                # true_Xs, true_Ys = zip(*[self._dset[self._true_indeces[j]] \
+                #            for j in range(self._true_index,
+                #                           self._true_index + n_true_per_batch) \
+                #            if not j >= len(self._true_indeces)])
+                self._true_index += n_true_per_batch
+
+                stacked_Xs = torch.cat((true_Xs, false_Xs))
+                stacked_Ys = torch.cat((true_Ys, false_Ys))
+                yield stacked_Xs, stacked_Ys
+            return StopIteration
 
         for i in range(0, len(self._indeces), self._batch_size):
             Xs, Ys = zip(*[self._dset[self._indeces[j]] \
@@ -261,19 +291,19 @@ class ExperimentDataLoader:
 
         return StopIteration
 
-def basic_data_splitter(dset, is_oneshot = False, batch_size = 128):
+def basic_data_splitter(dset, is_oneshot = False, batch_size = 128, is_balanced = True):
     train_indeces, val_indeces, test_indeces = \
         split_dataset_indeces(dset, 0.33, 0.33)
     return \
         ExperimentDataLoader(
             dset, train_indeces, batch_size = batch_size, is_shuffle = True, \
-            is_oneshot = is_oneshot), \
+            is_oneshot = is_oneshot, is_balanced = is_balanced), \
         ExperimentDataLoader(
             dset, val_indeces, batch_size = batch_size, is_shuffle = False, \
-            is_oneshot = is_oneshot), \
+            is_oneshot = is_oneshot, is_balanced = is_balanced), \
         ExperimentDataLoader(
             dset, test_indeces, batch_size = batch_size, is_shuffle = False, \
-            is_oneshot = is_oneshot)
+            is_oneshot = is_oneshot, is_balanced = is_balanced)
 
 def _single_run_dset(loader, model, optim, criteriorator, device, is_train,
                      return_outputs= False):
@@ -284,6 +314,7 @@ def _single_run_dset(loader, model, optim, criteriorator, device, is_train,
     for bx, by in loader:
         if(is_train):
             optim.zero_grad()
+        bx.to(device)
         byh = model(bx)
         loss = criteriorator.loss_func(byh, by)
         if(is_train):
@@ -328,11 +359,11 @@ def _perform_episode(
         summary_dir,
         data_loaders,
         logger, device, config):
-
     train_losses = []
     val_losses = []
 
     model = config.model_creator_func()
+    model.to(device)
     optim = config.optim_class(params = model.parameters(), **config.optim_args)
     epoch_num = 0
 
@@ -345,8 +376,8 @@ def _perform_episode(
     while(run_flag):
         stop_flag, best_flag, train_crit, val_crit = \
             _single_epoch(data_loaders['train'],
-                          data_loaders['val'], model,
-                          optim, criteriorator, device)
+                        data_loaders['val'], model,
+                        optim, criteriorator, device)
         train_crits.append(train_crit)
         val_crits.append(val_crit)
         run_flag = not stop_flag
@@ -369,7 +400,7 @@ def _perform_episode(
     return ep_res
 
 def _perform_multiple_episodes(
-        summary_dir, dataset, device, config):
+        summary_dir, dataset, device, config, is_mp):
     episode_results = []
     def _gen_episodes():
         for episode_index in range(config.n_episodes):
@@ -383,7 +414,7 @@ def _perform_multiple_episodes(
                 config] #config
 
     episode_results = None
-    if(config.is_mp):
+    if(is_mp):
         with mp.Pool(N_MP_WORKERS) as mppool:
             result = mppool.starmap_async(
                 _perform_episode, _gen_episodes())
@@ -411,14 +442,15 @@ class ExperimentConfiguration:
     n_episodes : int = 5
     is_mp : bool = False
 
-def run_configurations(summary_dir, conf_list, dataset, device = 'cpu'):
+def run_configurations(summary_dir, conf_list, dataset, device = 'cpu', is_mp = False):
     logging.info('Starting running configurations!')
     conf_res = \
         [_perform_multiple_episodes(
             summary_dir = joinmakedir(summary_dir, c.name),
             dataset = dataset,
             device = device,
-            config = c) \
+            config = c,
+            is_mp = is_mp) \
             for c in conf_list]
     summarize_all_configurations(summary_dir, conf_res, conf_list)
 

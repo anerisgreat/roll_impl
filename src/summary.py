@@ -90,15 +90,15 @@ def summarize_episode(summary_dir, ep_res, config):
 
         #Score distrib graph
         true_yh, false_yh = np_split_true_false(result.yh, result.y)
-        _summarize_score_w_transform(
-            transform = lambda x: x,
-            transform_name = 'none',
-            dist_approx_dict = {
-                'norm' : _get_pdf_from_dist(norm)},
-            true_yh = true_yh,
-            false_yh = false_yh,
-            summary_dir = summary_dir,
-            split = split)
+        # _summarize_score_w_transform(
+        #     transform = lambda x: x,
+        #     transform_name = 'none',
+        #     dist_approx_dict = {
+        #         'norm' : _get_pdf_from_dist(norm)},
+        #     true_yh = true_yh,
+        #     false_yh = false_yh,
+        #     summary_dir = summary_dir,
+        #     split = split)
         # _summarize_score_w_transform(
         #     transform = lambda x: np.exp(x),
         #     transform_name = 'exp',
@@ -127,20 +127,20 @@ def summarize_episode(summary_dir, ep_res, config):
         #     false_yh = false_yh,
         #     summary_dir = summary_dir,
         #     split = split)
-        _summarize_score_w_transform(
-            transform = lambda x: 1/(1 + np.exp(-x)),
-            transform_name = 'sigm',
-            #nakagami, rayleigh, gamma, invgamma, weibull_min
-            dist_approx_dict = {
-                'beta' : _get_pdf_from_dist(beta),
-                'nakagami' : _get_pdf_from_dist(nakagami),
-                'rayleigh' : _get_pdf_from_dist(rayleigh),
-                'invgamma' : _get_pdf_from_dist(invgamma),
-                'weibull_min' : _get_pdf_from_dist(weibull_min)},
-            true_yh = true_yh,
-            false_yh = false_yh,
-            summary_dir = summary_dir,
-            split = split)
+        # _summarize_score_w_transform(
+        #     transform = lambda x: 1/(1 + np.exp(-x)),
+        #     transform_name = 'sigm',
+        #     #nakagami, rayleigh, gamma, invgamma, weibull_min
+        #     dist_approx_dict = {
+        #         'beta' : _get_pdf_from_dist(beta),
+        #         'nakagami' : _get_pdf_from_dist(nakagami),
+        #         'rayleigh' : _get_pdf_from_dist(rayleigh),
+        #         'invgamma' : _get_pdf_from_dist(invgamma),
+        #         'weibull_min' : _get_pdf_from_dist(weibull_min)},
+        #     true_yh = true_yh,
+        #     false_yh = false_yh,
+        #     summary_dir = summary_dir,
+        #     split = split)
 
 
 @dataclass

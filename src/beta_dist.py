@@ -51,7 +51,6 @@ class Beta():
         :return: torch of threshold
         '''
 
-        #NOTE must autograd for pr/pa pr/pb and pr/px (three param function)
         return betaincinv(self.a, self.b, x)
 
 

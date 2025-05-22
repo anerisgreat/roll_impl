@@ -4,3 +4,4 @@ tmp
 venv
 results
 datasets
+.direnv

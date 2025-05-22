@@ -1,6 +1,8 @@
 import torch
 import logging
+from functools import partial
 from .beta_dist import Beta
+import numpy as np
 def _torch_mean_std(yh):
     yhmean = torch.mean(yh)
     yhstd = torch.std(yh)
@@ -18,23 +20,34 @@ def split_true_false(yh, y):
     false_yh = yh[false_indeces]
     return true_yh, false_yh
 
+def _roll_loss_from_fpr_internal(yh, y, fpr):
+    true_yh, false_yh = split_true_false(yh, y)
+    true_normal = _torch_normal_fit(true_yh)
+    false_normal = _torch_normal_fit(false_yh)
+    return true_normal.cdf(false_normal.icdf(torch.tensor(1 - fpr)))
+
 def roll_loss_from_fpr(fpr):
-    def _partial(yh, y):
-        true_yh, false_yh = split_true_false(yh, y)
-        true_normal = _torch_normal_fit(true_yh)
-        false_normal = _torch_normal_fit(false_yh)
-        return true_normal.cdf(false_normal.icdf(torch.tensor(1 - fpr)))
-    return _partial
+    return partial(_roll_loss_from_fpr_internal, fpr = fpr)
+
+def _roll_beta_loss_from_fpr_internal(yh, y, fpr):
+    yh = torch.nn.functional.sigmoid(yh)
+    true_yh, false_yh = split_true_false(yh, y)
+    true_beta = Beta.from_sample(true_yh)
+    false_beta = Beta.from_sample(false_yh)
+    return true_beta.cdf(false_beta.icdf(torch.tensor(1 - fpr)))
 
 def roll_beta_loss_from_fpr(fpr):
-    def _partial(yh, y):
-        yh = torch.nn.functional.sigmoid(yh)
-        true_yh, false_yh = split_true_false(yh, y)
-        true_beta = Beta.from_sample(true_yh)
-        false_beta = Beta.from_sample(false_yh)
-        return true_beta.cdf(false_beta.icdf(torch.tensor(1 - fpr)))
-    return _partial
+    return partial(_roll_beta_loss_from_fpr_internal, fpr = fpr)
 
+def roll_beta_aoc_loss(yh, y):
+    yh = torch.nn.functional.sigmoid(yh)
+    true_yh, false_yh = split_true_false(yh, y)
+    true_beta = Beta.from_sample(true_yh)
+    false_beta = Beta.from_sample(false_yh)
+    r = 0
+    for fpr in np.arange(0.001, 1.0, 0.001):
+        return true_beta.cdf(false_beta.icdf(torch.tensor(1 - fpr)))
+    return r/1000
 
 ##This part is non used
 #Calc moments

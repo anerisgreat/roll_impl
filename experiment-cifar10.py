@@ -13,10 +13,10 @@ from src.experiment import run_configurations, basic_data_splitter, \
 from src.datasets import ForestCoverDataset, Cifar10Dataset, TestGaussianDataset
 from src.utils import init_experiment
 from src.roll import roll_beta_loss_from_fpr, roll_loss_from_fpr
-
-run_dir = init_experiment('results', 'cifar10')
+import logging
 
 MAX_ITERS = 100
+N_EPISODES = 7
 
 class Net(nn.Module):
     def __init__(self):
@@ -36,34 +36,34 @@ class Net(nn.Module):
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
         return torch.flatten(x)
+if __name__ == '__main__':
+    run_dir = init_experiment('results', 'cifar10', console_level = logging.DEBUG)
+    device = torch.device('cpu')
+    dataset = Cifar10Dataset()
 
-device = torch.device('cpu')
-dataset = Cifar10Dataset()
+    configurations = [
+                ExperimentConfiguration(
+                name = f'beta-roll-{rr:0.2f}',
+                model_creator_func = Net,
+                data_splitter = partial(basic_data_splitter, batch_size = 512),
+                optim_class = torch.optim.Adam,
+                optim_args = {'lr' : 0.01},
+                criteriorator = CRBasedCriteriorator(
+                    roll_beta_loss_from_fpr(rr), MAX_ITERS, [rr]),
+                    n_episodes = N_EPISODES) \
+            for rr in [0.1, 0.3]
+        ] + [ExperimentConfiguration(
+                name = 'BCE',
+                model_creator_func = Net,
+                data_splitter = partial(basic_data_splitter, batch_size = 512),
+                optim_class = torch.optim.Adam,
+                optim_args = {'lr' : 0.01},
+                criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), MAX_ITERS),
+                n_episodes = N_EPISODES
+            )]
 
-configurations = [
-    ExperimentConfiguration(
-        name = 'BCE',
-        model_creator_func = Net,
-        data_splitter = basic_data_splitter,
-        optim_class = torch.optim.SGD,
-        optim_args = {'lr' : 0.1},
-        criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), MAX_ITERS),
-        n_episodes = 5
-    )] + [
-            ExperimentConfiguration(
-            name = f'beta-roll-{rr:0.2f}',
-            model_creator_func = Net,
-            data_splitter = partial(basic_data_splitter, is_oneshot = True),
-            optim_class = torch.optim.SGD,
-            optim_args = {'lr' : 0.1},
-            criteriorator = CRBasedCriteriorator(
-                roll_beta_loss_from_fpr(rr), MAX_ITERS, [rr]),
-            n_episodes = 5) \
-        for rr in [0.1, 0.3]
-    ]
+    logging.info('Starting experiment!')
 
-logging.info('Starting experiment!')
+    run_configurations(run_dir, configurations, dataset, is_mp = True)
 
-run_configurations(run_dir, configurations, dataset)
-
-logging.info('Script completed!')
+    logging.info('Script completed!')
