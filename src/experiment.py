@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from copy import deepcopy
+from copy import deepcopy, copy
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 import pandas as pd
@@ -247,9 +247,9 @@ class ExperimentDataLoader:
 
         if(self._is_shuffle):
             self._indeces = self._indeces[torch.randperm(len(self._indeces))]
-            self._true_indeces = torch.argwhere(self._dset[self._indeces][1]).flatten()
-            self._false_indeces = torch.argwhere(
-                torch.logical_not(self._dset[self._indeces][1])).flatten()
+            self._true_indeces = self._indeces[torch.argwhere(self._dset[self._indeces][1]).flatten()]
+            self._false_indeces = self._indeces[torch.argwhere(
+                torch.logical_not(self._dset[self._indeces][1])).flatten()]
 
         self._true_index = 0
         self._false_index = 0
@@ -369,7 +369,7 @@ def _perform_episode(
 
     run_flag = True
     best_model = deepcopy(model)
-    criteriorator = deepcopy(config.criteriorator)
+    criteriorator = copy(config.criteriorator)
     criteriorator.init_episode()
     train_crits = []
     val_crits = []
