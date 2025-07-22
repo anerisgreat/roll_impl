@@ -101,15 +101,26 @@ class KernelizedROLLoss(Function):
 
         run_flag = True
         n_iters = 0
-        alpha = 1
-        while(run_flag and n_iters < 1000):
-            diff = x - KernelizedROLLoss._calc_cdf(theta, var, yt)
-            yt = yt + alpha * diff
+        alpha = 0.1
+        MAX_ITERS = 10000
+        while(run_flag and n_iters < MAX_ITERS):
+            ytguess = KernelizedROLLoss._calc_cdf(theta, var, yt)
+            if(torch.isnan(ytguess)):
+                logging.debug('NAN GUESS')
+            diff = x - ytguess
+            if(torch.isnan(diff)):
+                logging.debug('NAN DIFF')
+            #TODO not sure about this
+            ytag = -torch.mean(KernelizedROLLoss._sigma_tag_function(var, theta - yt)) - 1
+            if(torch.isnan(ytag)):
+                logging.debug('NAN YTAG')
+            yt = yt - diff/ytag
             n_iters += 1
 
-            run_flag = not (torch.abs(diff) < 1e-3)
-        if(n_iters == 1000):
+            run_flag = not (torch.abs(diff) < 1e-4)
+        if(n_iters == MAX_ITERS):
             logging.warning(f'Errors reached, diff is still {diff}')
+            logging.warning(f'var: {var}')
         return yt
 
     def _calc_true_deriv(vart, a, xt):
@@ -145,16 +156,20 @@ class KernelizedROLLoss(Function):
         true_indeces, false_indeces = split_true_false_indeces(yh, y)
         true_yh = yh[true_indeces]
         false_yh = yh[false_indeces]
-        vart = torch.minimum(1/(torch.var(true_yh)), torch.tensor(10))
-        varf = torch.minimum(1/(torch.var(false_yh)), torch.tensor(10))
-        # vart = 1/torch.sqrt(torch.var(true_yh))
-        # varf = 1/torch.sqrt(torch.var(false_yh))
 
-        # varf = torch.tensor(1)
-        # vart = torch.tensor(1)
+        # varf = torch.minimum(
+        #     torch.tensor(1/improved_sheather_jones(
+        #         false_yh.numpy().astype(np.float64)[:,np.newaxis])),
+        #     torch.tensor(100.))
+        # vart = torch.minimum(
+        #     torch.tensor(1/improved_sheather_jones(
+        #         true_yh.numpy().astype(np.float64)[:,np.newaxis])),
+        #     torch.tensor(100.))
+        varf = torch.tensor(1/improved_sheather_jones(
+                false_yh.numpy().astype(np.float64)[:,np.newaxis]))
+        vart = torch.tensor(1/improved_sheather_jones(
+                true_yh.numpy().astype(np.float64)[:,np.newaxis]))
 
-        # vart = torch.sqrt(torch.tensor(len(true_yh)))
-        # varf = torch.sqrt(torch.tensor(len(false_yh)))
         icdf_false = KernelizedROLLoss._calc_icdf(false_yh, varf, target_fpr)
         loss = KernelizedROLLoss._calc_cdf(true_yh, vart, icdf_false)
 

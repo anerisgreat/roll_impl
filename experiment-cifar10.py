@@ -12,11 +12,11 @@ from src.experiment import run_configurations, basic_data_splitter, \
     oneshot_datasplitter
 from src.datasets import ForestCoverDataset, Cifar10Dataset, TestGaussianDataset
 from src.utils import init_experiment
-from src.roll import roll_beta_loss_from_fpr, roll_loss_from_fpr
+from src.roll import roll_loss_from_fpr, roll_beta_loss_from_fpr, roll_beta_aoc_loss, kernelized_roll_fpr
 import logging
 
-MAX_ITERS = 100
-N_EPISODES = 7
+MAX_ITERS = 200
+N_EPISODES = 3
 
 class Net(nn.Module):
     def __init__(self):
@@ -43,21 +43,23 @@ if __name__ == '__main__':
 
     configurations = [
                 ExperimentConfiguration(
-                name = f'beta-roll-{rr:0.2f}',
+                name = f'roll-kernel-{rr:0.2f}',
                 model_creator_func = Net,
-                data_splitter = partial(basic_data_splitter, batch_size = 512),
+                data_splitter = partial(basic_data_splitter, batch_size = 2048, is_balanced = True),
                 optim_class = torch.optim.Adam,
-                optim_args = {'lr' : 0.01},
-                criteriorator = CRBasedCriteriorator(
-                    roll_beta_loss_from_fpr(rr), MAX_ITERS, [rr]),
+                optim_args = {'lr' : 1e-3, 'weight_decay' : 1e-4},
+                # criteriorator = CRBasedCriteriorator(
+                #     kernelized_roll_fpr(rr), MAX_ITERS, [rr]),
+                criteriorator = BasicCriteriorator(
+                    kernelized_roll_fpr(rr), MAX_ITERS),
                     n_episodes = N_EPISODES) \
             for rr in [0.1, 0.3]
         ] + [ExperimentConfiguration(
                 name = 'BCE',
                 model_creator_func = Net,
-                data_splitter = partial(basic_data_splitter, batch_size = 512),
+                data_splitter = partial(basic_data_splitter, batch_size = 2048, is_balanced = True),
                 optim_class = torch.optim.Adam,
-                optim_args = {'lr' : 0.01},
+                optim_args = {'lr' : 1e-3, 'weight_decay' : 1e-4},
                 criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), MAX_ITERS),
                 n_episodes = N_EPISODES
             )]
