@@ -2,6 +2,8 @@ import scipy
 import torch
 import numpy as np
 from sklearn.preprocessing import StandardScaler, PowerTransformer
+import os
+import keel_ds
 
 #for Adult
 from adult import Adult
@@ -95,3 +97,79 @@ class AdultDataset:
 
     def __len__(self, i):
         return len(self._data)
+
+KEEL_TYPE_MAP = {
+    'integer' : int,
+    'real' : float,
+    'Class' : str
+    }
+
+class TorchStandardScaler:
+    def fit(self, x):
+        """
+        Calculates the mean and standard deviation of the input tensor x.
+        """
+        self.mean = x.mean(0, keepdim=True)
+        self.std = x.std(0, unbiased=False, keepdim=True)
+
+    def transform(self, x):
+        """
+        Applies the standardization transform to the input tensor x.
+        """
+        x -= self.mean
+        x /= (self.std + 1e-7)  # Add a small epsilon to prevent division by zero
+        return x
+
+    def fit_transform(self, x):
+        """
+        Fits the scaler and then transforms the input tensor.
+        """
+        self.fit(x)
+        return self.transform(x)
+
+class KeelDataset:
+    def __init__(self, dset_name):
+        keel_data = keel_ds.load_data(dset_name)
+        fold = keel_data[0]
+        self.x = TorchStandardScaler().fit_transform(
+            torch.from_numpy(np.concatenate((fold[0], fold[2]))).float())
+        self.y = torch.from_numpy(np.concatenate((fold[1], fold[3]))).float()
+
+    def __getitem__(self, i):
+        return self.x[i], self.y[i]
+
+    def __len__(self):
+        return len(self.x)
+
+def parse_keel_dat(file_path):
+    attributes = []
+    data = []
+    in_data_section = False
+
+    with open(file_path, 'r') as f:
+        for line in f:
+            line = line.strip()
+
+            if line.lower().startswith('@relation'):
+                # Process relation name if needed
+                pass
+            elif line.lower().startswith('@attribute'):
+                # Parse attribute definition
+                parts = line.split()
+                attr_name = parts[1]
+                attr_type = parts[2]
+                attributes.append({'name': attr_name, 'type': attr_type})
+            elif line.lower().startswith('@data'):
+                in_data_section = True
+            elif in_data_section and line:
+                # Parse data rows (assuming comma-separated values)
+                data.append([item.strip() for item in line.split(',')])
+    attribute_name_type_map = dict(map(lambda d: tuple(d['name'], KEEL_TYPE_MAP[d['type']]), attributes))
+    return attributes, data
+
+def get_keel_dataset():
+    file_path = os.getenv('keel_wisconsin_dir')
+    attributes, data = parse_keel_dat(file_path)
+
+    print("Attributes:", attributes)
+    print("Data (first 5 rows):", data[:5])

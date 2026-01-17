@@ -10,10 +10,13 @@ import plotly.graph_objects as go
 import plotly.express as px
 
 from .utils import joinmakedir
+from .roll import KernelizedROLLoss
 from scipy.stats import gamma, skewnorm, genhyperbolic, norminvgauss, nct, beta, norm
 from scipy.stats import nakagami, rayleigh, gamma, invgamma, weibull_min
 import pickle
 import logging
+import torch
+from KDEpy.bw_selection import improved_sheather_jones
 
 from functools import partial
 
@@ -67,6 +70,46 @@ def _summarize_score_w_transform(
     fig = px.ecdf(all_df, x = 'score', color = 'label')
     fig.write_html(os.path.join(summary_dir, f'{split}-f{transform_name}-scores.html'))
 
+def _summarize_single_split_roll_cdf(true_yh, false_yh, summary_dir, split):
+    # true_dist_approx = {
+    #     f'f{k}_true_approx' : v(true_yh) \
+    #     for k, v in dist_approx_dict.items()}
+    # false_dist_approx = {
+    #     f'f{k}_false_approx' : v(false_yh)\
+    #     for k, v in dist_approx_dict.items()}
+
+    true_yht = torch.Tensor(true_yh)
+    false_yht = torch.Tensor(false_yh)
+
+    varf = torch.tensor(1/improved_sheather_jones(
+            false_yht.numpy().astype(np.float64)[:,np.newaxis]))
+    vart = torch.tensor(1/improved_sheather_jones(
+            true_yht.numpy().astype(np.float64)[:,np.newaxis]))
+    true_yht_x = np.array([KernelizedROLLoss._calc_icdf(true_yht, vart, x)
+                           for x in torch.arange(0.01, 1, 0.01)])
+    false_yht_x = np.array([KernelizedROLLoss._calc_icdf(false_yht, varf, x)
+                           for x in torch.arange(0.01, 1, 0.01)])
+    cdf_y = np.arange(0.01, 1, 0.01)
+
+
+    true_df = pd.DataFrame({'label' : 'True', 'score' : true_yh})
+    false_df = pd.DataFrame({'label' : 'False', 'score' : false_yh})
+
+    all_df = pd.concat((true_df, false_df),
+                        ignore_index = True)
+    fig = px.ecdf(all_df, x = 'score', color = 'label')
+
+    fig.add_trace(go.Scatter(x = true_yht_x, y = cdf_y, mode = 'lines', name = 'True ROLL CDF'))
+    fig.add_trace(go.Scatter(x = false_yht_x, y = cdf_y, mode = 'lines', name = 'False ROLL CDF'))
+    fig.write_html(os.path.join(summary_dir, f'{split}-roll-cdf.html'))
+
+
+def summarize_split_roll_cdf(summary_dir, ep_res, config):
+    for split_name, split_res in ep_res.split_results.items():
+        true_yh, false_yh = np_split_true_false(split_res.yh, split_res.y)
+        _summarize_single_split_roll_cdf(true_yh, false_yh, summary_dir, split_name)
+
+
 def summarize_episode(summary_dir, ep_res, config):
     criteria_dir = joinmakedir(summary_dir, 'criteria')
     #Summarize criteria
@@ -82,6 +125,9 @@ def summarize_episode(summary_dir, ep_res, config):
             ))
         fig.update_layout(showlegend = True)
         fig.write_html(os.path.join(criteria_dir, f'{split}.html'))
+
+    #Summarize split stuff
+    summarize_split_roll_cdf(summary_dir, ep_res, config)
 
     #Summarize scores
     for split, result in ep_res.split_results.items():

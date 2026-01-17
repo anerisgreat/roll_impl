@@ -1,8 +1,9 @@
 import torch
 import logging
 from functools import partial
-from .beta_dist import Beta
+# from .beta_dist import Beta
 import numpy as np
+from KDEpy.bw_selection import improved_sheather_jones
 def _torch_mean_std(yh):
     yhmean = torch.mean(yh)
     yhstd = torch.std(yh)
@@ -85,6 +86,11 @@ from torch.autograd import Function
 class KernelizedROLLoss(Function):
     @staticmethod
     def _sigma_tag_function(var, x):
+        #All X are negative. The derivative is symmetric w.r.t x
+        #however, numerically, negative values calculate better
+        #positive values reach infinity while negative reaches zero
+        #which doesn't crash the calc
+        x = torch.abs(x)
         return (var * torch.exp(-var*x))/((1 + torch.exp(-var*x))**2)
 
     @staticmethod
@@ -93,6 +99,9 @@ class KernelizedROLLoss(Function):
 
     @staticmethod
     def _calc_icdf(theta, var, x):
+        if(var > 1000.):
+            logging.warning(f'Var of {var} over maximum of 1000, capping')
+            var = 1000.
         #Theta is all the Xs to be kernelized
         #var is the variance of the gaussian kernel
         #x is the pointn at which to calculate
@@ -131,9 +140,7 @@ class KernelizedROLLoss(Function):
 
     #Note need to multiply by threshold deriv for full effect
     def _calc_false_deriv(varf, a, xf):
-
-        # dfleftsingle = (1/xf.shape[0])*varf*(torch.exp(varf*(a - xf))/((torch.exp(varf*(a - xf)) + 1)**2))
-        dfleftsingle = varf*(torch.exp(varf*(xf - a))/((torch.exp(varf*(xf - a)) + 1)**2))
+        dfleftsingle = KernelizedROLLoss._sigma_tag_function(varf, xf - a)
         dfleft = torch.sum(dfleftsingle) - dfleftsingle
 
         sigmoids = KernelizedROLLoss._sigma_function(varf, xf - a)
@@ -157,19 +164,22 @@ class KernelizedROLLoss(Function):
         true_yh = yh[true_indeces]
         false_yh = yh[false_indeces]
 
-        # varf = torch.minimum(
-        #     torch.tensor(1/improved_sheather_jones(
-        #         false_yh.numpy().astype(np.float64)[:,np.newaxis])),
-        #     torch.tensor(100.))
-        # vart = torch.minimum(
-        #     torch.tensor(1/improved_sheather_jones(
-        #         true_yh.numpy().astype(np.float64)[:,np.newaxis])),
-        #     torch.tensor(100.))
-        varf = torch.tensor(1/improved_sheather_jones(
-                false_yh.numpy().astype(np.float64)[:,np.newaxis]))
-        vart = torch.tensor(1/improved_sheather_jones(
-                true_yh.numpy().astype(np.float64)[:,np.newaxis]))
+        varf = torch.minimum(
+            torch.tensor(1/improved_sheather_jones(
+                false_yh.numpy().astype(np.float64)[:,np.newaxis])),
+            torch.tensor(1000.))
+        vart = torch.minimum(
+            torch.tensor(1/improved_sheather_jones(
+                true_yh.numpy().astype(np.float64)[:,np.newaxis])),
+            torch.tensor(1000.))
 
+        # varf = torch.tensor(1/improved_sheather_jones(
+        #         false_yh.numpy().astype(np.float64)[:,np.newaxis]))
+        # vart = torch.tensor(1/improved_sheather_jones(
+        #         true_yh.numpy().astype(np.float64)[:,np.newaxis]))
+
+        if(varf > 1000.):
+            logging.error('NO FUCK YOU UUUUU')
         icdf_false = KernelizedROLLoss._calc_icdf(false_yh, varf, target_fpr)
         loss = KernelizedROLLoss._calc_cdf(true_yh, vart, icdf_false)
 
@@ -195,7 +205,8 @@ class KernelizedROLLoss(Function):
         grad_target = None
         grad_fpr = None
         if(torch.any(torch.isnan(grad_input))):
-            logging.error('NAN GRADIENT')
+            logging.error('NAN GRADIENT') # logging.info(torch.sum(torch.abs(grad_input)))
+        # grad_input = grad_input / torch.sum(torch.abs(grad_input))
         return grad_fpr, grad_input, grad_target
 
 def _kernelized_roll_fpr_internal(yh, y, fpr):

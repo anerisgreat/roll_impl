@@ -10,7 +10,7 @@ import logging
 from src.experiment import run_configurations, basic_data_splitter, \
     BasicCriteriorator, ExperimentConfiguration, CRBasedCriteriorator, \
     oneshot_datasplitter
-from src.datasets import ForestCoverDataset, Cifar10Dataset, TestGaussianDataset
+from src.datasets import get_keel_dataset
 from src.utils import init_experiment
 from src.roll import roll_loss_from_fpr, roll_beta_loss_from_fpr, roll_beta_aoc_loss, kernelized_roll_fpr
 import logging
@@ -42,7 +42,7 @@ class Net(nn.Module):
 if __name__ == '__main__':
     run_dir = init_experiment('results', 'cifar10', console_level = logging.DEBUG)
     device = torch.device('cpu')
-    dataset = Cifar10Dataset()
+    dataset = get_keel_dataset()
 
     configurations = [
                 ExperimentConfiguration(

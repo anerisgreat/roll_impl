@@ -12,7 +12,7 @@ from src.experiment import run_configurations, basic_data_splitter, \
 from src.datasets import ForestCoverDataset
 from src.utils import init_experiment
 
-from src.roll import roll_loss_from_fpr, roll_beta_loss_from_fpr, roll_beta_aoc_loss
+from src.roll import roll_loss_from_fpr, roll_beta_loss_from_fpr, roll_beta_aoc_loss, kernelized_roll_fpr
 
 
 N_EPISODES = 7
@@ -23,8 +23,8 @@ class MyNet(nn.Module):
         super().__init__()
         layers = [
             nn.Linear(10, 1),
-            # nn.ReLU(),
-            # nn.Linear(3, 1)
+            nn.ReLU(),
+            nn.Linear(3, 1)
             ]
         # layers = [
         #     x for y in [
@@ -42,24 +42,24 @@ if __name__ == '__main__':
 
     configurations = [
         ExperimentConfiguration(
-            name = f'roll-beta-{rr:0.2f}',
+            name = f'roll-kernel-{rr:0.2f}',
             model_creator_func = MyNet,
             data_splitter = partial(basic_data_splitter, is_oneshot = False, is_balanced = True, batch_size = 2048),
-            optim_class = torch.optim.SGD,
-            optim_args = {'lr' : 0.01},
+            optim_class = torch.optim.Adam,
+            optim_args = {'lr' : 0.01, 'weight_decay' : 1e-4},
             criteriorator = CRBasedCriteriorator(
-                roll_beta_loss_from_fpr(rr), N_EPOCHS, [rr]),
+                kernelized_roll_fpr(rr), N_EPOCHS, [rr]),
             n_episodes = N_EPISODES) \
         for rr in [0.05, 0.025]] + [
-            ExperimentConfiguration(
-                name = f'beta-aoc',
-                model_creator_func = MyNet,
-                data_splitter = partial(basic_data_splitter, is_oneshot = False, is_balanced = True, batch_size = 2048),
-                optim_class = torch.optim.Adam,
-                optim_args = {'lr' : 0.01},
-                criteriorator = CRBasedCriteriorator(
-                    roll_beta_aoc_loss, N_EPOCHS, [0.05]),
-                n_episodes = N_EPISODES),
+            # ExperimentConfiguration(
+            #     name = f'beta-aoc',
+            #     model_creator_func = MyNet,
+            #     data_splitter = partial(basic_data_splitter, is_oneshot = False, is_balanced = True, batch_size = 2048),
+            #     optim_class = torch.optim.Adam,
+            #     optim_args = {'lr' : 0.01},
+            #     criteriorator = CRBasedCriteriorator(
+            #         roll_beta_aoc_loss, N_EPOCHS, [0.05]),
+            #     n_episodes = N_EPISODES),
         ExperimentConfiguration(
             name = 'BCE',
             model_creator_func = MyNet,

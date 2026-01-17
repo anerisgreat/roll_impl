@@ -232,12 +232,12 @@ class ExperimentDataLoader:
         self._is_oneshot = is_oneshot
         self._is_shuffle = is_shuffle
 
-        self._true_indeces = torch.argwhere(
+        self._true_indeces = self._indeces[torch.argwhere(
                 self._dset[self._indeces][1]
-            ).flatten()
-        self._false_indeces = torch.argwhere(
+            ).flatten()]
+        self._false_indeces = self._indeces[torch.argwhere(
                 torch.logical_not(self._dset[self._indeces][1])
-            ).flatten()
+            ).flatten()]
 
     def __iter__(self):
         if(self._is_oneshot):
@@ -270,7 +270,6 @@ class ExperimentDataLoader:
                 #            if not j >= len(self._false_indeces)])
                 self._false_index += n_false_per_batch
 
-                
                 true_Xs, true_Ys = self._dset[self._true_indeces[self._true_index:self._true_index + n_true_per_batch]]
                 # true_Xs, true_Ys = zip(*[self._dset[self._true_indeces[j]] \
                 #            for j in range(self._true_index,

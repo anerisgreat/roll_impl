@@ -13,13 +13,14 @@ from src.utils import init_experiment
 from src.roll import roll_loss_from_fpr, KernelizedROLLoss, kernelized_roll_fpr
 
 
-N_EPOCHS = 1000
-N_EPISODES = 1
+N_EPOCHS = 200
+# N_EPOCHS = 1
+N_EPISODES = 3
 
 class DumbLinear(nn.Module):
     def __init__(self):
         super().__init__()
-        layers = [nn.Linear(2, 1), nn.Sigmoid()]
+        layers = [nn.Linear(2, 1)]
         self._layers = nn.Sequential(
             *layers)
 
@@ -40,20 +41,20 @@ if __name__ == '__main__':
         ExperimentConfiguration(
             name = f'GR{r}',
             model_creator_func = DumbLinear,
-            data_splitter = partial(basic_data_splitter, is_oneshot = False, batch_size = 1024, is_balanced = True),
+            data_splitter = partial(basic_data_splitter, is_oneshot = False, batch_size = 256, is_balanced = True),
             optim_class = torch.optim.SGD,
             optim_args = {'lr' : 0.01},
             # criteriorator = BasicCriteriorator(GaussianRollLoss(0.2, 0.1), N_EPOCHS),
             criteriorator = BasicCriteriorator(kernelized_roll_fpr(r), N_EPOCHS),
             n_episodes = N_EPISODES)
-        for r in [0.1, 0.2, 0.3, 0.4]] + [
+        for r in [0.1, 0.2]] + [
         ExperimentConfiguration(
             name = 'BCE',
             model_creator_func = DumbLinear,
             data_splitter = basic_data_splitter,
             optim_class = torch.optim.Adam,
             optim_args = {'lr' : 0.1},
-            criteriorator = BasicCriteriorator(torch.nn.BCELoss(), N_EPOCHS),
+            criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), N_EPOCHS),
             n_episodes = N_EPISODES),
         ]
     # + [ ExperimentConfiguration(
@@ -70,6 +71,6 @@ if __name__ == '__main__':
 
     logging.info('Starting experiment!')
 
-    run_configurations(run_dir, configurations, dataset, is_mp = False)
+    run_configurations(run_dir, configurations, dataset, is_mp = True)
 
     logging.info('Script completed!')
