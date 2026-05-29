@@ -99,9 +99,9 @@ class KernelizedROLLoss(Function):
 
     @staticmethod
     def _calc_icdf(theta, var, x):
-        if(var > 1000.):
-            logging.warning(f'Var of {var} over maximum of 1000, capping')
-            var = 1000.
+        if(var > 10000.):
+            logging.warning(f'Var of {var} over maximum of 10000, capping')
+            var = 10000.
         #Theta is all the Xs to be kernelized
         #var is the variance of the gaussian kernel
         #x is the pointn at which to calculate
@@ -159,40 +159,53 @@ class KernelizedROLLoss(Function):
 
     @staticmethod
     def forward(ctx, target_fpr, yh, y):
+        # Compute variance adjustment
+
+        #Step 1 - compute standard deviation of yh
+        # Compute variance and standard deviation of the predictions
+        var = torch.var(yh, correction=1)
+        std = torch.sqrt(var)
+        multiplier = 1/std
+        yh_mult = yh * multiplier
         # Compute the loss
         true_indeces, false_indeces = split_true_false_indeces(yh, y)
-        true_yh = yh[true_indeces]
-        false_yh = yh[false_indeces]
+        true_yh = yh_mult[true_indeces]
+        false_yh = yh_mult[false_indeces]
 
         varf = torch.minimum(
             torch.tensor(1/improved_sheather_jones(
                 false_yh.numpy().astype(np.float64)[:,np.newaxis])),
-            torch.tensor(1000.))
+            torch.tensor(10000.))
+        # logging.debug(f'VARF: {varf}')
         vart = torch.minimum(
             torch.tensor(1/improved_sheather_jones(
                 true_yh.numpy().astype(np.float64)[:,np.newaxis])),
-            torch.tensor(1000.))
+            torch.tensor(10000.))
+        # logging.debug(f'VART: {vart}')
+        # wanted_vart = torch.tensor(1/improved_sheather_jones(
+        #         true_yh.numpy().astype(np.float64)[:,np.newaxis]))
+        # logging.debug(f'Wanted VART: {wanted_vart}')
 
         # varf = torch.tensor(1/improved_sheather_jones(
         #         false_yh.numpy().astype(np.float64)[:,np.newaxis]))
         # vart = torch.tensor(1/improved_sheather_jones(
         #         true_yh.numpy().astype(np.float64)[:,np.newaxis]))
 
-        if(varf > 1000.):
+        if(varf > 10000.):
             logging.error('NO FUCK YOU UUUUU')
         icdf_false = KernelizedROLLoss._calc_icdf(false_yh, varf, target_fpr)
         loss = KernelizedROLLoss._calc_cdf(true_yh, vart, icdf_false)
 
         ctx.save_for_backward(y, yh, true_yh, false_yh, \
                               true_indeces, false_indeces, icdf_false, loss,
-                              vart, varf)
+                              vart, varf, multiplier)
 
         return loss
 
     @staticmethod
     def backward(ctx, grad_output) :
         y, yh, true_yh, false_yh, true_indeces, false_indeces, \
-            icdf_false, loss, vart, varf = ctx.saved_tensors
+            icdf_false, loss, vart, varf, multiplier = ctx.saved_tensors
 
         true_grads = KernelizedROLLoss._calc_true_deriv(
             vart, icdf_false, true_yh)
@@ -207,7 +220,9 @@ class KernelizedROLLoss(Function):
         if(torch.any(torch.isnan(grad_input))):
             logging.error('NAN GRADIENT') # logging.info(torch.sum(torch.abs(grad_input)))
         # grad_input = grad_input / torch.sum(torch.abs(grad_input))
-        return grad_fpr, grad_input, grad_target
+        # since we multiplied all scores by multiplier
+        # we need to correct for this by multiplying by the multiplier here
+        return grad_fpr, grad_input/multiplier, grad_target
 
 def _kernelized_roll_fpr_internal(yh, y, fpr):
     return KernelizedROLLoss.apply(fpr, yh, y)
@@ -215,3 +230,14 @@ def _kernelized_roll_fpr_internal(yh, y, fpr):
 def kernelized_roll_fpr(fpr):
     return partial(_kernelized_roll_fpr_internal,
                    fpr = 1 - fpr)
+
+def kernelized_roll_tpr(tpr):
+    def _wrapper(yh, y):
+        return KernelizedROLLoss.apply(
+            1 - tpr,
+            1 - yh,
+            1 - y)
+    return _wrapper
+    # return partial(_kernelized_roll_fpr_internal,
+    #                fpr = tpr)
+

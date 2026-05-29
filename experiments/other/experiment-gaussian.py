@@ -1,3 +1,6 @@
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+
 import torch
 from functools import partial
 from torch import nn
@@ -57,17 +60,6 @@ if __name__ == '__main__':
             criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), N_EPOCHS),
             n_episodes = N_EPISODES),
         ]
-    # + [ ExperimentConfiguration(
-    #             name = f'roll-{rr:0.2f}',
-    #             model_creator_func = DumbLinear,
-    #             data_splitter = partial(basic_data_splitter, is_oneshot = True),
-    #             optim_class = torch.optim.Adam,
-    #             optim_args = {'lr' : 0.1},
-    #             criteriorator = CRBasedCriteriorator(
-    #                 roll_loss_from_fpr(rr), N_EPOCHS, [rr]),
-    #             n_episodes = N_EPISODES) \
-    #         for rr in [0.05, 0.1, 0.2, 0.3, 0.4, 0.5]
-        # ]
 
     logging.info('Starting experiment!')
 

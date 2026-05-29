@@ -1,8 +1,10 @@
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+
 import torch
 from functools import partial
 from torch import nn
 import numpy as np
-from functools import partial
 import torch.nn.functional as F
 
 from torchvision import datasets, transforms
@@ -10,18 +12,19 @@ import logging
 from src.experiment import run_configurations, basic_data_splitter, \
     BasicCriteriorator, ExperimentConfiguration, CRBasedCriteriorator, \
     oneshot_datasplitter
-from src.datasets import  KeelDataset
+from src.datasets import KeelDataset
 from src.utils import init_experiment
 from src.roll import roll_loss_from_fpr, roll_beta_loss_from_fpr, roll_beta_aoc_loss, kernelized_roll_fpr
 import logging
 
-MAX_ITERS = 5000
+MAX_ITERS = 500
 N_EPISODES = 3
 
 class Net(nn.Module):
     def __init__(self):
         super().__init__()
         layers = [
+            nn.Dropout(p = 0.50),
                 nn.Linear(9, 9),
                 nn.ReLU(),
                 nn.Linear(9, 9),
@@ -36,6 +39,7 @@ class Net(nn.Module):
 
     def forward(self, x):
         return torch.flatten(self._layers(x))
+
 if __name__ == '__main__':
     run_dir = init_experiment('results', 'wisconsin', console_level = logging.DEBUG)
     device = torch.device('cpu')
@@ -48,9 +52,6 @@ if __name__ == '__main__':
                 data_splitter = partial(basic_data_splitter, batch_size = 128, is_balanced = True),
                 optim_class = torch.optim.Adam,
                 optim_args = {'lr' : 1e-4},
-                # optim_args = {'lr' : 1e-4, 'weight_decay' : 1e-4},
-                # criteriorator = CRBasedCriteriorator(
-                #     kernelized_roll_fpr(rr), MAX_ITERS, [rr]),
                 criteriorator = BasicCriteriorator(
                     kernelized_roll_fpr(rr), MAX_ITERS),
                     n_episodes = N_EPISODES) \
@@ -60,7 +61,6 @@ if __name__ == '__main__':
                 model_creator_func = Net,
                 data_splitter = partial(basic_data_splitter, batch_size = 128, is_balanced = True),
                 optim_class = torch.optim.Adam,
-                # optim_args = {'lr' : 1e-4, 'weight_decay' : 1e-4},
                 optim_args = {'lr' : 1e-4},
                 criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), MAX_ITERS),
                 n_episodes = N_EPISODES

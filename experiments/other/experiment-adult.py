@@ -1,3 +1,6 @@
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+
 import torch
 from functools import partial
 from torch import nn
@@ -7,12 +10,12 @@ import logging
 
 from adult import Adult
 
-from src.experiment import run_coonfigurations, basic_data_splitter, \
+from src.experiment import run_configurations, basic_data_splitter, \
     BasicCriteriorator, ExperimentConfiguration, CRBasedCriteriorator, \
     oneshot_datasplitter
 from src.datasets import AdultDataset
 from src.utils import init_experiment
-from src.roll import roll_loss_from_fpr, roll_beta_loss_from_fpr, roll_beta_aoc_loss, kernelized_roll_fpr
+from src.roll import roll_loss_from_fpr, roll_beta_loss_from_fpr, roll_beta_aoc_loss, kernelized_roll_fpr, kernelized_roll_tpr
 
 MAX_ITERS = 5000
 N_EPISODES = 7
@@ -53,8 +56,8 @@ if __name__ == '__main__':
             model_creator_func = MyNet,
             data_splitter = partial(basic_data_splitter, is_oneshot = False, batch_size = 2048, is_balanced = True),
             optim_class = optim,
-            optim_args = {'lr' : 0.001, 'weight_decay' : 1e-4},
-            criteriorator = BasicCriteriorator(kernelized_roll_fpr(0.02), MAX_ITERS),
+            optim_args = {'lr' : 0.00001, 'weight_decay' : 1e-4},
+            criteriorator = BasicCriteriorator(kernelized_roll_tpr(0.95), MAX_ITERS, 5.0),
             n_episodes = N_EPISODES) for optim in [
                 torch.optim.Adam,
             ]] + [
@@ -63,13 +66,13 @@ if __name__ == '__main__':
             model_creator_func = MyNet,
             data_splitter = partial(basic_data_splitter, batch_size = 2048, is_oneshot = False),
             optim_class = torch.optim.RMSprop,
-            optim_args = {'lr' : 0.01, 'weight_decay' : 1e-4},
+            optim_args = {'lr' : 0.00001, 'weight_decay' : 1e-4},
             criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), MAX_ITERS),
             n_episodes = N_EPISODES),
         ]
 
     logging.info('Starting experiment!')
 
-    run_configurations(run_dir, configurations, AdultDataset(), is_mp = True)
+    run_configurations(run_dir, configurations, AdultDataset(), is_mp = False)
 
     logging.info('Script completed!')

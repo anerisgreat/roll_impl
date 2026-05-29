@@ -1,8 +1,10 @@
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+
 import torch
 from functools import partial
 from torch import nn
 import numpy as np
-from functools import partial
 import torch.nn.functional as F
 
 from torchvision import datasets, transforms
@@ -39,6 +41,7 @@ class Net(nn.Module):
 
     def forward(self, x):
         return torch.flatten(self._layers(x))
+
 if __name__ == '__main__':
     run_dir = init_experiment('results', 'cifar10', console_level = logging.DEBUG)
     device = torch.device('cpu')
@@ -51,9 +54,6 @@ if __name__ == '__main__':
                 data_splitter = partial(basic_data_splitter, batch_size = 256, is_balanced = True),
                 optim_class = torch.optim.Adam,
                 optim_args = {'lr' : 1e-4},
-                # optim_args = {'lr' : 1e-4, 'weight_decay' : 1e-4},
-                # criteriorator = CRBasedCriteriorator(
-                #     kernelized_roll_fpr(rr), MAX_ITERS, [rr]),
                 criteriorator = BasicCriteriorator(
                     kernelized_roll_fpr(rr), MAX_ITERS),
                     n_episodes = N_EPISODES) \
@@ -63,7 +63,6 @@ if __name__ == '__main__':
                 model_creator_func = Net,
                 data_splitter = partial(basic_data_splitter, batch_size = 256, is_balanced = True),
                 optim_class = torch.optim.Adam,
-                # optim_args = {'lr' : 1e-4, 'weight_decay' : 1e-4},
                 optim_args = {'lr' : 1e-4},
                 criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), MAX_ITERS),
                 n_episodes = N_EPISODES

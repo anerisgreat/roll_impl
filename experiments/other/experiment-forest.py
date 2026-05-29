@@ -1,11 +1,12 @@
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+
 import torch
 from functools import partial
 from torch import nn
 import numpy as np
-from functools import partial
 import logging
 
-import logging
 from src.experiment import run_configurations, basic_data_splitter, \
     BasicCriteriorator, ExperimentConfiguration, CRBasedCriteriorator, \
     oneshot_datasplitter

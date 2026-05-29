@@ -64,14 +64,37 @@
             url = fetchurl;
             hash = dsetHash;
         };
-        # phases = [ "unpackPhase" "installPhase" ];
         installPhase = ''
         mkdir -p $out
         cp $src/*.dat $out/
         '';
-        # installPhase = "install -D $src $out/" + builtins.baseNameOf fetchurl;
       });
+
+      uciDerivation = dsetName: dsetHash: (pkgs.stdenv.mkDerivation rec {
+        pname = "${dsetName}-uci-derivation";
+        version = "1.0";
+
+        buildInputs = [pkgs.unzip];
+
+        fetchurl = "https://archive.ics.uci.edu/static/public/222/bank+marketing.zip";
+        src = pkgs.fetchzip {
+            url = fetchurl;
+            hash = dsetHash;
+            stripRoot = false;
+        };
+        installPhase = ''
+        mkdir -p $out
+        mkdir -p /tmp/bank-extract
+        cd /tmp/bank-extract
+        for f in ${src}/*.zip; do
+          unzip -o "$f"
+        done
+        find . -name "*.csv" -exec cp {} $out/ \;
+        '';
+      });
+
       keelDerivationsToHash = {
+        # Existing datasets
         "wisconsin" =
           "sha256-wEDv5f+lk4Ov2+NiIdo+eSV4q6kJheNQCkHpxY+jJGc=";
         "pima" =
@@ -98,27 +121,46 @@
           "sha256-1Pb7aMaW05MNqx2sfJtUmFkuZNSbM2vFI9XlLkhwbjk=";
         "page-blocks-1-3_vs_4" =
           "sha256-OyPo1k6q6JPZiJNKoixc8zWKH/SbVB0IbCvlH9JqN0U=";
-        # "dermatology-6" =
-        #   "sha256-deDv5f+lk4Ov2+NiIdo+eSV4q6kJheNQCkHpxY+jJGc=";
-        # "zoo-3" =
-        #   "sha256-zoDv5f+lk4Ov2+NiIdo+eSV4q6kJheNQCkHpxY+jJGc=";
-        # "shuttle-6_vs_2-3" =
-        #   "sha256-shDv5f+lk4Ov2+NiIdo+eSV4q6kJheNQCkHpxY+jJGc=";
-        # "winequality-red-4" =
-        #   "sha256-fEDv5f+lk4Ov2+NiIdo+eSV4q6kJheNQCkHpxY+jJGc=";
-        # "poker-9_vs_7" =
-        #   "sha256-fEDv5f+lk4Ov2+NiIdo+eSV4q6kJheNQCkHpxY+jJGc=";
+        # New glass datasets
+        "glass0" =
+          "sha256-T3YAL9g1Wu9paMX51U53xhACmZjLjPuvOQf/dk5+wCk=";
+        "glass1" =
+          "sha256-L9+XPAfSXH7bdN4g6sD8UiWWgAga8QuNE5/7+wy4hzA=";
+        "glass2" =
+          "sha256-42Glc6Ujaq6MTfR0EvpBwZGZtCZhYul6TQlnGbW0JN8=";
+        "glass5" =
+          "sha256-WhqRbiWNykCikh7EB4Zp/oP2A4mgNWmnLa2VrgzW2uw=";
+        "glass6" =
+          "sha256-c1vib7czReLfmaJci5b+coBSeT37u9qV6eleA9fbGi4=";
       };
+
+      uciDerivationsToHash = {
+        "bank-additional" =
+          "sha256-+myYl/cDZ73d3tTZkdcUa4MoxlZkyvlaPqExha84Vs4=";
+      };
+
       keelDerivationsMap = builtins.mapAttrs
         (name: hash: (keelDerivation name hash)) keelDerivationsToHash;
+      uciDerivationsMap = builtins.mapAttrs
+        (name: hash: (uciDerivation name hash)) uciDerivationsToHash;
+
       keelNameToPathMap = builtins.mapAttrs
         (name: deriv: "${deriv}/${name}.dat") keelDerivationsMap;
-      keelDerivationsList = builtins.attrValues keelDerivationsMap;
+      uciNameToPathMap = builtins.mapAttrs
+        (name: deriv: "${deriv}") uciDerivationsMap;
+
       keelShellHookEntriesMap = builtins.mapAttrs
-        (name: path: "export keel_${name}_dir=${path};")
+        (name: path: "export keel_${builtins.replaceStrings ["-"] ["_"] name}_dir=${path};")
         keelNameToPathMap;
+      uciShellHookEntriesMap = builtins.mapAttrs
+        (name: path: "export uci_${builtins.replaceStrings ["-"] ["_"] name}_dir=${path};")
+        uciNameToPathMap;
+
       keelShellHookString = builtins.concatStringsSep "\n"
         (builtins.attrValues keelShellHookEntriesMap);
+      uciShellHookString = builtins.concatStringsSep "\n"
+        (builtins.attrValues uciShellHookEntriesMap);
+      fullShellHookString = keelShellHookString + "\n" + uciShellHookString;
     in{
         devShells.${system}.default = pkgs.mkShell {
           buildInputs = with pkgs; [
@@ -142,9 +184,6 @@
 
                         propagatedBuildInputs = [pandas poetry-core ];
                         format="pyproject";
-                        # patches =
-                        #     (o.patches or []) ++ [./adult-dataset-numpy-version.patch];
-
                     })
 
                     ( buildPythonPackage rec {
@@ -173,7 +212,7 @@
                     })
 
                 ]))];
-            shellHook = keelShellHookString;
+            shellHook = fullShellHookString;
         };
     };
 }

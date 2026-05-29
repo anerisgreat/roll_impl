@@ -26,12 +26,8 @@ class ModelDataResult:
 @dataclass
 class EpisodeResult:
     best_model : torch.nn.Module
-    split_results : Dict[str, ModelDataResult] = field(default_factory = {})
-    split_criteria_epochs : Dict[str, pd.DataFrame] = field(default_factory = {})
-
-@dataclass
-class MultiEpisodeResult:
-    episode_reults : list
+    split_results : Dict[str, ModelDataResult] = field(default_factory = dict)
+    split_criteria_epochs : Dict[str, pd.DataFrame] = field(default_factory = dict)
 
 @dataclass
 class MultiEpisodeResult:
@@ -68,9 +64,11 @@ class Criteriorator(ABC):
         return self._loss_func
 
 class BasicCriteriorator(Criteriorator):
-    def __init__(self, loss_func, max_iters):
+    def __init__(self, loss_func, max_iters, max_grad_norm = None):
         self._loss_func = loss_func
         self._max_iters = max_iters
+
+        self.max_grad_norm = max_grad_norm
 
     def init_episode(self):
         self._n_iters = 0
@@ -243,7 +241,7 @@ class ExperimentDataLoader:
         if(self._is_oneshot):
             yield self._dset[self._indeces]
 
-            return StopIteration
+            return
 
         if(self._is_shuffle):
             self._indeces = self._indeces[torch.randperm(len(self._indeces))]
@@ -258,7 +256,9 @@ class ExperimentDataLoader:
         if(self._is_balanced):
             n_true = len(self._true_indeces)
             n_false = len(self._false_indeces)
-            n_true_per_batch = int((n_true / (n_true + n_false)) * self._batch_size)
+            n_true_per_batch = max(1,
+                                   int((n_true / (n_true + n_false)) \
+                                       * self._batch_size))
             n_false_per_batch = self._batch_size - n_true_per_batch
 
             while(self._true_index <= n_true - n_true_per_batch and \
@@ -304,6 +304,14 @@ def basic_data_splitter(dset, is_oneshot = False, batch_size = 128, is_balanced 
             dset, test_indeces, batch_size = batch_size, is_shuffle = False, \
             is_oneshot = is_oneshot, is_balanced = is_balanced)
 
+def grad_norm(model):
+    total_norm = 0.0
+    for p in model.parameters():
+        if p.grad is not None:
+            param_norm = p.grad.detach().data.norm(2)   # L2‑norm
+            total_norm += param_norm.item() ** 2
+    return total_norm ** 0.5
+
 def _single_run_dset(loader, model, optim, criteriorator, device, is_train,
                      return_outputs= False):
     loss_list = []
@@ -318,6 +326,12 @@ def _single_run_dset(loader, model, optim, criteriorator, device, is_train,
         loss = criteriorator.loss_func(byh, by)
         if(is_train):
             loss.backward()
+            # ----- CLIP GRADIENTS -----
+            # logging.debug(f'Grad norm (model):\t{grad_norm(model)}')
+            if criteriorator.max_grad_norm is not None:
+                torch.nn.utils.clip_grad_norm_(model.parameters(),
+                                               criteriorator.max_grad_norm)
+
             optim.step()
 
         loss_list.append(loss.item())
@@ -339,7 +353,7 @@ def _single_epoch(train_loader, val_loader,
     train_crit = _single_run_dset(
         train_loader, model, optim, criteriorator, device, is_train = True)
     val_crit = _single_run_dset(
-        train_loader, model, optim, criteriorator, device, is_train = False)
+        val_loader, model, optim, criteriorator, device, is_train = False)
 
     stop_flag, best_flag = criteriorator.get_stop_best_flags(
         train_crit = train_crit, val_crit = val_crit)
@@ -435,8 +449,9 @@ class ExperimentConfiguration:
     model_creator_func : callable
     optim_class : torch.optim.Optimizer = torch.optim.Adam
     optim_args : Dict = field(default_factory = lambda : {'lr' : 0.001})
-    criteriorator : Criteriorator = BasicCriteriorator(
-        torch.nn.BCEWithLogitsLoss(), 100)
+    criteriorator : Criteriorator = field(
+        default_factory=lambda: BasicCriteriorator(
+            torch.nn.BCEWithLogitsLoss(), 100))
     data_splitter : callable = basic_data_splitter
     n_episodes : int = 5
     is_mp : bool = False

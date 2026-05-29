@@ -128,12 +128,12 @@ class TorchStandardScaler:
         return self.transform(x)
 
 class KeelDataset:
-    def __init__(self, dset_name):
-        keel_data = keel_ds.load_data(dset_name)
+    def __init__(self, dset_name, type_data='imbalanced'):
+        keel_data = keel_ds.load_data(dset_name, type_data=type_data)
         fold = keel_data[0]
         self.x = TorchStandardScaler().fit_transform(
-            torch.from_numpy(np.concatenate((fold[0], fold[2]))).float())
-        self.y = torch.from_numpy(np.concatenate((fold[1], fold[3]))).float()
+            torch.from_numpy(np.concatenate((fold[0], fold[2])).astype(float)).float())
+        self.y = torch.from_numpy(np.concatenate((fold[1], fold[3])).astype(float)).float()
 
     def __getitem__(self, i):
         return self.x[i], self.y[i]
@@ -173,3 +173,40 @@ def get_keel_dataset():
 
     print("Attributes:", attributes)
     print("Data (first 5 rows):", data[:5])
+
+
+class BankMarketingDataset:
+    def __init__(self):
+        data_dir = os.getenv('uci_bank_additional_dir')
+        if data_dir is None:
+            raise ValueError("UCI Bank Marketing dataset not found. Set uci_bank_additional_dir environment variable.")
+        
+        import pandas as pd
+        csv_path = os.path.join(data_dir, 'bank-additional-full.csv')
+        if not os.path.exists(csv_path):
+            csv_path = os.path.join(data_dir, 'bank-full.csv')
+        if not os.path.exists(csv_path):
+            csv_path = os.path.join(data_dir, 'bank.csv')
+        
+        df = pd.read_csv(csv_path, sep=';')
+        df['y'] = (df['y'] == 'yes').astype(int)
+        
+        categorical_cols = ['job', 'marital', 'education', 'default', 'housing', 
+                           'loan', 'contact', 'month', 'day_of_week', 'poutcome']
+        df = pd.get_dummies(df, columns=categorical_cols, drop_first=True)
+        
+        feature_cols = [c for c in df.columns if c != 'y']
+        X = df[feature_cols].values.astype(np.float32)
+        y = df['y'].values.astype(np.float32)
+        
+        self.x = torch.tensor(X, dtype=torch.float32)
+        self.y = torch.tensor(y, dtype=torch.float32)
+        
+        self._scaler = TorchStandardScaler()
+        self.x = self._scaler.fit_transform(self.x)
+
+    def __getitem__(self, i):
+        return self.x[i], self.y[i]
+
+    def __len__(self):
+        return len(self.x)
