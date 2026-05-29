@@ -134,6 +134,22 @@
           "sha256-c1vib7czReLfmaJci5b+coBSeT37u9qV6eleA9fbGi4=";
       };
 
+      higgsDerivation = pkgs.stdenv.mkDerivation {
+        pname = "higgs-uci-derivation";
+        version = "1.0";
+        src = pkgs.fetchzip {
+          url = "https://archive.ics.uci.edu/static/public/280/higgs.zip";
+          # Fill this in by running:
+          # nix store prefetch-file --hash-type sha256 --unpack https://archive.ics.uci.edu/static/public/280/higgs.zip
+          hash = "sha256-PO//JdVhniLRjLyKD1zRfIjGOY6UJFwf1ljxZJKDyHE=";
+          stripRoot = false;
+        };
+        installPhase = ''
+          mkdir -p $out
+          cp $src/HIGGS.csv.gz $out/
+        '';
+      };
+
       uciDerivationsToHash = {
         "bank-additional" =
           "sha256-+myYl/cDZ73d3tTZkdcUa4MoxlZkyvlaPqExha84Vs4=";
@@ -160,7 +176,12 @@
         (builtins.attrValues keelShellHookEntriesMap);
       uciShellHookString = builtins.concatStringsSep "\n"
         (builtins.attrValues uciShellHookEntriesMap);
-      fullShellHookString = keelShellHookString + "\n" + uciShellHookString;
+      manualDatasetsShellHookString = ''
+        export uci_higgs_dir=${higgsDerivation};
+        export credit_card_fraud_dir=$HOME/.data/creditcard;
+        export home_credit_dir=$HOME/.data/homecredit;
+      '';
+      fullShellHookString = keelShellHookString + "\n" + uciShellHookString + "\n" + manualDatasetsShellHookString;
     in{
         devShells.${system}.default = pkgs.mkShell {
           buildInputs = with pkgs; [

@@ -180,30 +180,127 @@ class BankMarketingDataset:
         data_dir = os.getenv('uci_bank_additional_dir')
         if data_dir is None:
             raise ValueError("UCI Bank Marketing dataset not found. Set uci_bank_additional_dir environment variable.")
-        
+
         import pandas as pd
         csv_path = os.path.join(data_dir, 'bank-additional-full.csv')
         if not os.path.exists(csv_path):
             csv_path = os.path.join(data_dir, 'bank-full.csv')
         if not os.path.exists(csv_path):
             csv_path = os.path.join(data_dir, 'bank.csv')
-        
+
         df = pd.read_csv(csv_path, sep=';')
         df['y'] = (df['y'] == 'yes').astype(int)
-        
-        categorical_cols = ['job', 'marital', 'education', 'default', 'housing', 
+
+        categorical_cols = ['job', 'marital', 'education', 'default', 'housing',
                            'loan', 'contact', 'month', 'day_of_week', 'poutcome']
         df = pd.get_dummies(df, columns=categorical_cols, drop_first=True)
-        
+
         feature_cols = [c for c in df.columns if c != 'y']
         X = df[feature_cols].values.astype(np.float32)
         y = df['y'].values.astype(np.float32)
-        
+
         self.x = torch.tensor(X, dtype=torch.float32)
         self.y = torch.tensor(y, dtype=torch.float32)
-        
+
         self._scaler = TorchStandardScaler()
         self.x = self._scaler.fit_transform(self.x)
+
+    def __getitem__(self, i):
+        return self.x[i], self.y[i]
+
+    def __len__(self):
+        return len(self.x)
+
+
+class HiggsDataset:
+    def __init__(self, n_samples=500_000):
+        import pandas as pd
+        data_dir = os.getenv('uci_higgs_dir')
+        if data_dir is None:
+            raise ValueError("HIGGS dataset not found. Set uci_higgs_dir environment variable.")
+
+        df = pd.read_csv(os.path.join(data_dir, 'HIGGS.csv.gz'),
+                         header=None, compression='gzip')
+
+        if n_samples is not None and n_samples < len(df):
+            pos = df[df[0] == 1.0].sample(n=n_samples // 2, random_state=42)
+            neg = df[df[0] == 0.0].sample(n=n_samples // 2, random_state=42)
+            df = pd.concat([pos, neg]).sample(frac=1, random_state=42)
+
+        y = df.iloc[:, 0].values.astype(np.float32)
+        X = df.iloc[:, 1:].values.astype(np.float32)
+
+        self.x = TorchStandardScaler().fit_transform(
+            torch.tensor(X, dtype=torch.float32))
+        self.y = torch.tensor(y, dtype=torch.float32)
+
+    def __getitem__(self, i):
+        return self.x[i], self.y[i]
+
+    def __len__(self):
+        return len(self.x)
+
+
+class CreditCardFraudDataset:
+    def __init__(self):
+        import pandas as pd
+        data_dir = os.getenv('credit_card_fraud_dir')
+        if data_dir is None:
+            raise ValueError(
+                "Credit card fraud dataset not found.\n"
+                "  Set credit_card_fraud_dir environment variable, or use `nix develop` which sets it automatically.\n"
+                "  Expected file: $credit_card_fraud_dir/creditcard.csv\n"
+                "  Default path:  ~/.data/creditcard/creditcard.csv\n"
+                "  Download from: https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud\n"
+                "  (Kaggle account required — download creditcard.csv and place it at the path above)"
+            )
+
+        df = pd.read_csv(os.path.join(data_dir, 'creditcard.csv'))
+
+        y = df['Class'].values.astype(np.float32)
+        feature_cols = [c for c in df.columns if c != 'Class']
+        X = df[feature_cols].values.astype(np.float32)
+
+        x = torch.tensor(X, dtype=torch.float32)
+        # V1-V28 are already PCA-scaled; only scale Time and Amount (cols 0 and 29)
+        scaler = TorchStandardScaler()
+        x[:, [0, 29]] = scaler.fit_transform(x[:, [0, 29]])
+
+        self.x = x
+        self.y = torch.tensor(y, dtype=torch.float32)
+
+    def __getitem__(self, i):
+        return self.x[i], self.y[i]
+
+    def __len__(self):
+        return len(self.x)
+
+
+class HomeCreditDataset:
+    def __init__(self):
+        import pandas as pd
+        data_dir = os.getenv('home_credit_dir')
+        if data_dir is None:
+            raise ValueError(
+                "Home Credit dataset not found.\n"
+                "  Set home_credit_dir environment variable, or use `nix develop` which sets it automatically.\n"
+                "  Expected file: $home_credit_dir/application_train.csv\n"
+                "  Default path:  ~/.data/homecredit/application_train.csv\n"
+                "  Download from: https://www.kaggle.com/competitions/home-credit-default-risk/data\n"
+                "  (Kaggle account required — download application_train.csv and place it at the path above)"
+            )
+
+        df = pd.read_csv(os.path.join(data_dir, 'application_train.csv'))
+
+        y = df['TARGET'].values.astype(np.float32)
+        df = df.drop(columns=['TARGET', 'SK_ID_CURR'])
+        df = df.select_dtypes(include=[np.number])
+        df = df.fillna(0)
+
+        X = df.values.astype(np.float32)
+        self.x = TorchStandardScaler().fit_transform(
+            torch.tensor(X, dtype=torch.float32))
+        self.y = torch.tensor(y, dtype=torch.float32)
 
     def __getitem__(self, i):
         return self.x[i], self.y[i]
