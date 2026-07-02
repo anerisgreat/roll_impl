@@ -95,7 +95,7 @@ class AdultDataset:
         retx, rety = self._data[i]
         return retx, rety.float()
 
-    def __len__(self, i):
+    def __len__(self):
         return len(self._data)
 
 KEEL_TYPE_MAP = {

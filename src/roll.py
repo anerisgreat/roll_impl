@@ -119,7 +119,7 @@ class KernelizedROLLoss(Function):
             diff = x - ytguess
             if(torch.isnan(diff)):
                 logging.debug('NAN DIFF')
-            #TODO not sure about this
+            #Application of newton/raphson method
             ytag = -torch.mean(KernelizedROLLoss._sigma_tag_function(var, theta - yt)) - 1
             if(torch.isnan(ytag)):
                 logging.debug('NAN YTAG')
@@ -158,7 +158,7 @@ class KernelizedROLLoss(Function):
         )
 
     @staticmethod
-    def forward(ctx, target_fpr, yh, y):
+    def forward(ctx, target_fpr, yh, y, gamma=1.0):
         # Compute variance adjustment
 
         #Step 1 - compute standard deviation of yh
@@ -175,12 +175,12 @@ class KernelizedROLLoss(Function):
         varf = torch.minimum(
             torch.tensor(1/improved_sheather_jones(
                 false_yh.numpy().astype(np.float64)[:,np.newaxis])),
-            torch.tensor(10000.))
+            torch.tensor(10000.)) / gamma
         # logging.debug(f'VARF: {varf}')
         vart = torch.minimum(
             torch.tensor(1/improved_sheather_jones(
                 true_yh.numpy().astype(np.float64)[:,np.newaxis])),
-            torch.tensor(10000.))
+            torch.tensor(10000.)) / gamma
         # logging.debug(f'VART: {vart}')
         # wanted_vart = torch.tensor(1/improved_sheather_jones(
         #         true_yh.numpy().astype(np.float64)[:,np.newaxis]))
@@ -196,6 +196,7 @@ class KernelizedROLLoss(Function):
         icdf_false = KernelizedROLLoss._calc_icdf(false_yh, varf, target_fpr)
         loss = KernelizedROLLoss._calc_cdf(true_yh, vart, icdf_false)
 
+        logging.debug(f'Kernel gamma: {gamma:.4f}, varf: {varf:.4f}, vart: {vart:.4f}')
         ctx.save_for_backward(y, yh, true_yh, false_yh, \
                               true_indeces, false_indeces, icdf_false, loss,
                               vart, varf, multiplier)
@@ -222,21 +223,22 @@ class KernelizedROLLoss(Function):
         # grad_input = grad_input / torch.sum(torch.abs(grad_input))
         # since we multiplied all scores by multiplier
         # we need to correct for this by multiplying by the multiplier here
-        return grad_fpr, grad_input/multiplier, grad_target
+        return grad_fpr, grad_input/multiplier, grad_target, None  # None for gamma
 
-def _kernelized_roll_fpr_internal(yh, y, fpr):
-    return KernelizedROLLoss.apply(fpr, yh, y)
+def _kernelized_roll_fpr_internal(yh, y, fpr, gamma=1.0):
+    return KernelizedROLLoss.apply(fpr, yh, y, gamma)
 
 def kernelized_roll_fpr(fpr):
     return partial(_kernelized_roll_fpr_internal,
                    fpr = 1 - fpr)
 
 def kernelized_roll_tpr(tpr):
-    def _wrapper(yh, y):
+    def _wrapper(yh, y, gamma=1.0):
         return KernelizedROLLoss.apply(
-            1 - tpr,
+            tpr,
             1 - yh,
-            1 - y)
+            1 - y,
+            gamma)
     return _wrapper
     # return partial(_kernelized_roll_fpr_internal,
     #                fpr = tpr)

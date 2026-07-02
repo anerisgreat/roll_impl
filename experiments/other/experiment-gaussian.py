@@ -31,8 +31,7 @@ class DumbLinear(nn.Module):
         return self._layers(x).squeeze()
 
 if __name__ == '__main__':
-    run_dir = init_experiment('results', 'gaussian', console_level = logging.DEBUG)
-    device = torch.device('cpu')
+    run_dir = init_experiment('results', 'gaussian')
     dataset = TestGaussianDataset(
         loc_false = (0, 0), scale_false = (0, 1),
         n_false = 10000,

@@ -37,8 +37,7 @@ class Net(nn.Module):
         return torch.flatten(self._layers(x))
 
 if __name__ == '__main__':
-    run_dir = init_experiment('results', 'bank-marketing', console_level=logging.DEBUG)
-    device = torch.device('cpu')
+    run_dir = init_experiment('results', 'bank-marketing')
     dataset = BankMarketingDataset()
 
     input_dim = dataset.x.shape[1]

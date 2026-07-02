@@ -11,8 +11,9 @@ from functools import partial
 import torch.multiprocessing as mp
 import time
 from scipy.stats import beta
+from numpy.typing import NDArray
 
-from .utils import joinmakedir
+from .utils import joinmakedir, get_device
 from .summary import summarize_episode, summarize_all_episodes, summarize_all_configurations
 
 N_MP_WORKERS = 4
@@ -20,14 +21,14 @@ N_MP_WORKERS = 4
 @dataclass
 class ModelDataResult:
     criteria : pd.DataFrame
-    y : np.array
-    yh : np.array
+    y : NDArray[np.int32]
+    yh : NDArray[np.float32]
 
 @dataclass
 class EpisodeResult:
     best_model : torch.nn.Module
-    split_results : Dict[str, ModelDataResult] = field(default_factory = dict)
-    split_criteria_epochs : Dict[str, pd.DataFrame] = field(default_factory = dict)
+    split_results : dict[str, ModelDataResult] = field(default_factory = dict)
+    split_criteria_epochs : dict[str, pd.DataFrame] = field(default_factory = dict)
 
 @dataclass
 class MultiEpisodeResult:
@@ -39,6 +40,38 @@ class MultiEpisodeResult:
                     (ep_res.split_results[split_name].y, ep_res.split_results[split_name].yh) \
                     for ep_res in self.episode_results])) \
                             for split_name in split_names}
+
+class KernelScheduler:
+    """Anneals ROLL kernel bandwidth during training.
+
+    Starts kernels at `initial_gamma` × the ISJ estimate (wider = smoother
+    loss surface), then halves every `decay_every` epochs until gamma ≤ 1.
+
+    Pass an instance as `kernel_scheduler` to a Criteriorator to enable.
+    Leave `kernel_scheduler=None` (default) to disable.
+    """
+    def __init__(self, initial_gamma: float = 100.0,
+                 decay: float = 0.5, decay_every: int = 100):
+        self.initial_gamma: float = float(initial_gamma)
+        self.decay: float = decay
+        self.decay_every: int = decay_every
+        self._epoch: int = 0
+        self._gamma: float = self.initial_gamma
+
+    def reset(self):
+        self._epoch = 0
+        self._gamma = self.initial_gamma
+
+    def step(self):
+        self._epoch += 1
+        if self._gamma > 1.0 and self._epoch % self.decay_every == 0:
+            self._gamma = max(1.0, self._gamma * self.decay)
+            logging.info(f'KernelScheduler step: epoch={self._epoch}, gamma={self._gamma:.4f}')
+
+    @property
+    def gamma(self) -> float:
+        return self._gamma
+
 
 class Criteriorator(ABC):
     @abstractmethod
@@ -64,21 +97,26 @@ class Criteriorator(ABC):
         return self._loss_func
 
 class BasicCriteriorator(Criteriorator):
-    def __init__(self, loss_func, max_iters, max_grad_norm = None):
+    def __init__(self, loss_func, max_iters, max_grad_norm=None,
+                 kernel_scheduler: KernelScheduler = None):
         self._loss_func = loss_func
         self._max_iters = max_iters
-
         self.max_grad_norm = max_grad_norm
+        self._kernel_scheduler = kernel_scheduler
 
     def init_episode(self):
         self._n_iters = 0
         self._best_loss = np.inf
+        if self._kernel_scheduler is not None:
+            self._kernel_scheduler.reset()
 
     def loss_func(self, yh, y):
+        if self._kernel_scheduler is not None:
+            return self._loss_func(yh, y, gamma=self._kernel_scheduler.gamma)
         return self._loss_func(yh, y)
 
     def _get_loss(self, yh, y):
-        loss = self._loss_func(yh, y).detach().numpy()
+        loss = self._loss_func(yh, y).detach().cpu().numpy()
         if(isinstance(loss, np.ndarray)):
             loss = np.mean(loss)
         return loss
@@ -96,24 +134,33 @@ class BasicCriteriorator(Criteriorator):
             self._best_loss = newloss
         stop_flag = self._n_iters >= self._max_iters
 
+        if self._kernel_scheduler is not None:
+            self._kernel_scheduler.step()
+
         return stop_flag, best_flag
 
 class CRBasedCriteriorator(Criteriorator):
-    def __init__(self, loss_func, max_iters, fprs):
+    def __init__(self, loss_func, max_iters, fprs,
+                 kernel_scheduler: KernelScheduler = None):
         self._loss_func = loss_func
         self._max_iters = max_iters
         self._fprs = fprs
+        self._kernel_scheduler = kernel_scheduler
 
     def init_episode(self):
         self._n_iters = 0
         self._best_loss = np.inf
         self._best_crs = [0 for _ in self._fprs]
+        if self._kernel_scheduler is not None:
+            self._kernel_scheduler.reset()
 
     def loss_func(self, yh, y):
+        if self._kernel_scheduler is not None:
+            return self._loss_func(yh, y, gamma=self._kernel_scheduler.gamma)
         return self._loss_func(yh, y)
 
     def _get_loss(self, yh, y):
-        loss = self._loss_func(yh, y).detach().numpy()
+        loss = self._loss_func(yh, y).detach().cpu().numpy()
         if(isinstance(loss, np.ndarray)):
             loss = np.mean(loss)
         return loss
@@ -143,6 +190,9 @@ class CRBasedCriteriorator(Criteriorator):
         if(best_flag):
             self._best_loss = newloss
         stop_flag = self._n_iters >= self._max_iters
+
+        if self._kernel_scheduler is not None:
+            self._kernel_scheduler.step()
 
         return stop_flag, best_flag
 
@@ -175,8 +225,8 @@ def _get_tpr_at_fpr_internal(fpr, roc_fprs, roc_tprs):
     return roc_tprs[ind]
 
 def get_tpr_at_fprs(yh, y, fprs):
-    yh = np.squeeze(yh.detach().numpy())
-    y = np.squeeze((y > 0.).detach().numpy())
+    yh = np.squeeze(yh.detach().cpu().numpy())
+    y = np.squeeze((y > 0.).detach().cpu().numpy())
 
     yh_false = yh[np.argwhere(y == 0)]
     yh_true = yh[np.argwhere(y > 0)]
@@ -194,12 +244,12 @@ def get_tpr_at_fprs(yh, y, fprs):
     #         for fpr in fprs]
 
 def get_beta_fpr_at_fprs(yh, y, fprs):
-    yh = np.squeeze(yh.detach().numpy())
+    yh = np.squeeze(yh.detach().cpu().numpy())
 
     yh_sigm = 1/(1 + np.exp(-yh))
 
 
-    y = np.squeeze((y > 0.).detach().numpy())
+    y = np.squeeze((y > 0.).detach().cpu().numpy())
 
     yh_false = yh_sigm[np.argwhere(y == 0)]
     yh_true = yh_sigm[np.argwhere(y > 0)]
@@ -321,7 +371,8 @@ def _single_run_dset(loader, model, optim, criteriorator, device, is_train,
     for bx, by in loader:
         if(is_train):
             optim.zero_grad()
-        bx.to(device)
+        bx = bx.to(device)
+        by = by.to(device)
         byh = model(bx)
         loss = criteriorator.loss_func(byh, by)
         if(is_train):
@@ -365,8 +416,8 @@ def _get_model_data_result(loader, model, criteriorator, device):
         device = device,
         is_train = False, return_outputs = True)
     return ModelDataResult(criteria = crit,
-                           y = np.squeeze(y.detach().numpy()),
-                           yh = np.squeeze(yh.detach().numpy()))
+                           y = np.squeeze(y.detach().cpu().numpy()),
+                           yh = np.squeeze(yh.detach().cpu().numpy()))
 
 def _perform_episode(
         summary_dir,
@@ -386,6 +437,8 @@ def _perform_episode(
     criteriorator.init_episode()
     train_crits = []
     val_crits = []
+    best_epoch = 0
+    best_val_crit = None
     while(run_flag):
         stop_flag, best_flag, train_crit, val_crit = \
             _single_epoch(data_loaders['train'],
@@ -393,9 +446,16 @@ def _perform_episode(
                         optim, criteriorator, device)
         train_crits.append(train_crit)
         val_crits.append(val_crit)
+        epoch_num += 1
         run_flag = not stop_flag
         if(best_flag):
             best_model = deepcopy(model)
+            best_epoch = epoch_num
+            best_val_crit = val_crit
+    logging.info(
+        f'Training complete — best epoch: {best_epoch} / {epoch_num}, '
+        f'val metrics: {best_val_crit.iloc[0].to_dict()}'
+    )
 
     train_crits = pd.concat(train_crits, ignore_index = True)
     val_crits = pd.concat(val_crits, ignore_index = True)
@@ -456,7 +516,9 @@ class ExperimentConfiguration:
     n_episodes : int = 5
     is_mp : bool = False
 
-def run_configurations(summary_dir, conf_list, dataset, device = 'cpu', is_mp = False):
+def run_configurations(summary_dir, conf_list, dataset, device = None, is_mp = False):
+    if device is None:
+        device = get_device()
     logging.info('Starting running configurations!')
     conf_res = \
         [_perform_multiple_episodes(

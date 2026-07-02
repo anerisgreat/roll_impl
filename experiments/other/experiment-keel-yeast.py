@@ -40,8 +40,7 @@ class Net(nn.Module):
         return torch.flatten(self._layers(x))
 
 if __name__ == '__main__':
-    run_dir = init_experiment('results', 'banana', console_level = logging.DEBUG)
-    device = torch.device('cpu')
+    run_dir = init_experiment('results', 'banana')
     dataset = KeelDataset('banana')
 
     configurations = [

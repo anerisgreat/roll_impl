@@ -37,8 +37,7 @@ class MyNet(nn.Module):
         return self._layers(x)
 
 if __name__ == '__main__':
-    run_dir = init_experiment('results', 'forest', console_level = logging.DEBUG)
-    device = torch.device('cpu')
+    run_dir = init_experiment('results', 'forest')
     dataset = ForestCoverDataset()
 
     configurations = [

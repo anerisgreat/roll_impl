@@ -3,6 +3,7 @@ from logging import config as loggingconfig
 import logging
 import datetime
 from functools import partial
+import torch
 import torch.multiprocessing as mp
 
 def joinmakedir(a, b):
@@ -51,6 +52,15 @@ def logging_get_default_config(
              "filename" : debug_fname,
              "level" : logging.DEBUG}
         return base_dict
+
+def get_device():
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+        logging.info(f'Using GPU: {torch.cuda.get_device_name(0)}')
+    else:
+        device = torch.device('cpu')
+        logging.info('Using CPU')
+    return device
 
 def init_experiment(base_dir, experiment_name, console_level = logging.INFO):
     mp.set_start_method('spawn')

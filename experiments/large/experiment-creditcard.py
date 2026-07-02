@@ -29,7 +29,7 @@ class Net(nn.Module):
         return torch.flatten(self._layers(x))
 
 if __name__ == '__main__':
-    run_dir = init_experiment('results', 'creditcard', console_level=logging.DEBUG)
+    run_dir = init_experiment('results', 'creditcard')
     dataset = CreditCardFraudDataset()
 
     input_dim = dataset.x.shape[1]

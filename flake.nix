@@ -1,6 +1,12 @@
 {
   #https://nix.dev/guides/recipes/python-environment.html
   description = "Python development environment";
+  nixConfig = {
+    extra-substituters = [ "https://cuda-maintainers.cachix.org" ];
+    extra-trusted-public-keys = [
+      "cuda-maintainers.cachix.org-1:0dq3bujKpuEPMCX6U4WylrUDZ9JyUG0VpVZa7CNfq5E="
+    ];
+  };
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     nixpkgs-python.url = "github:cachix/nixpkgs-python";
@@ -52,7 +58,7 @@
             inherit system; inherit overlays;
             config = {
                 allowUnfree = true;
-                cudaSupport = false;
+                cudaSupport = true;
             };
       };
       keelDerivation = dsetName: dsetHash: (pkgs.stdenv.mkDerivation rec {

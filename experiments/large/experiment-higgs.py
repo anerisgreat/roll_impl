@@ -12,16 +12,21 @@ from src.datasets import HiggsDataset
 from src.utils import init_experiment
 from src.roll import kernelized_roll_fpr
 
-MAX_ITERS = 500
+MAX_ITERS = 2000
 N_EPISODES = 3
 
 class Net(nn.Module):
     def __init__(self, input_dim):
         super().__init__()
         self._layers = nn.Sequential(
-            nn.Linear(input_dim, 64), nn.ReLU(), nn.Dropout(0.3),
-            nn.Linear(64, 64),        nn.ReLU(), nn.Dropout(0.3),
-            nn.Linear(64, 32),        nn.ReLU(),
+            nn.Linear(input_dim, 64), nn.ReLU(), nn.Dropout(0.05),
+            nn.Linear(64, 64),        nn.ReLU(), nn.Dropout(0.05),
+            nn.Linear(64, 32),        nn.ReLU(), nn.Dropout(0.05),
+            nn.Linear(32, 32),        nn.ReLU(), nn.Dropout(0.05),
+            nn.Linear(32, 32),        nn.ReLU(), nn.Dropout(0.05),
+            nn.Linear(32, 32),        nn.ReLU(), nn.Dropout(0.05),
+            nn.Linear(32, 32),        nn.ReLU(), nn.Dropout(0.05),
+            nn.Linear(32, 32),        nn.ReLU(), nn.Dropout(0.05),
             nn.Linear(32, 1)
         )
 
@@ -29,7 +34,7 @@ class Net(nn.Module):
         return torch.flatten(self._layers(x))
 
 if __name__ == '__main__':
-    run_dir = init_experiment('results', 'higgs', console_level=logging.DEBUG)
+    run_dir = init_experiment('results', 'higgs')
     dataset = HiggsDataset(n_samples=500_000)
 
     input_dim = dataset.x.shape[1]
@@ -42,16 +47,16 @@ if __name__ == '__main__':
         ExperimentConfiguration(
             name=f'roll-kernel-{rr:0.2f}',
             model_creator_func=make_net,
-            data_splitter=partial(basic_data_splitter, batch_size=512, is_balanced=True),
+            data_splitter=partial(basic_data_splitter, batch_size=2048, is_balanced=True),
             optim_class=torch.optim.Adam,
             optim_args={'lr': 1e-4},
             criteriorator=BasicCriteriorator(kernelized_roll_fpr(rr), MAX_ITERS),
             n_episodes=N_EPISODES)
-        for rr in [0.02, 0.05]
+        for rr in [0.05]
     ] + [ExperimentConfiguration(
         name='BCE',
         model_creator_func=make_net,
-        data_splitter=partial(basic_data_splitter, batch_size=512, is_balanced=True),
+        data_splitter=partial(basic_data_splitter, batch_size=2048, is_balanced=True),
         optim_class=torch.optim.Adam,
         optim_args={'lr': 1e-4},
         criteriorator=BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), MAX_ITERS),
