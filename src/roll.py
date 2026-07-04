@@ -120,7 +120,7 @@ class KernelizedROLLoss(Function):
             if(torch.isnan(diff)):
                 logging.debug('NAN DIFF')
             #Application of newton/raphson method
-            ytag = -torch.mean(KernelizedROLLoss._sigma_tag_function(var, theta - yt)) - 1
+            ytag = -torch.mean(KernelizedROLLoss._sigma_tag_function(var, theta - yt))
             if(torch.isnan(ytag)):
                 logging.debug('NAN YTAG')
             yt = yt - diff/ytag
@@ -214,7 +214,7 @@ class KernelizedROLLoss(Function):
         false_grads = thresh_grad * KernelizedROLLoss._calc_false_deriv(
             varf, icdf_false, false_yh)
         grad_input = torch.zeros(yh.shape[0])
-        grad_input[true_indeces] = true_grads
+        grad_input[true_indeces] = true_grads * grad_output
         grad_input[false_indeces] = false_grads * grad_output
         grad_target = None
         grad_fpr = None
