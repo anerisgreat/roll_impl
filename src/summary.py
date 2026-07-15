@@ -1,4 +1,4 @@
-from sklearn.metrics import roc_curve
+from sklearn.metrics import roc_curve, roc_auc_score
 from dataclasses import dataclass
 import numpy as np
 import matplotlib.pyplot as plt
@@ -16,7 +16,7 @@ from scipy.stats import nakagami, rayleigh, gamma, invgamma, weibull_min
 import pickle
 import logging
 import torch
-from KDEpy.bw_selection import improved_sheather_jones
+from KDEpy.bw_selection import silvermans_rule
 
 from functools import partial
 
@@ -81,13 +81,13 @@ def _summarize_single_split_roll_cdf(true_yh, false_yh, summary_dir, split):
     true_yht = torch.Tensor(true_yh)
     false_yht = torch.Tensor(false_yh)
 
-    varf = torch.tensor(1/improved_sheather_jones(
+    varf = torch.tensor(1/silvermans_rule(
             false_yht.numpy().astype(np.float64)[:,np.newaxis]))
-    vart = torch.tensor(1/improved_sheather_jones(
+    vart = torch.tensor(1/silvermans_rule(
             true_yht.numpy().astype(np.float64)[:,np.newaxis]))
-    true_yht_x = np.array([KernelizedROLLoss._calc_icdf(true_yht, vart, x)
+    true_yht_x = np.array([KernelizedROLLoss._icdf(vart, true_yht, x)
                            for x in torch.arange(0.01, 1, 0.01)])
-    false_yht_x = np.array([KernelizedROLLoss._calc_icdf(false_yht, varf, x)
+    false_yht_x = np.array([KernelizedROLLoss._icdf(varf, false_yht, x)
                            for x in torch.arange(0.01, 1, 0.01)])
     cdf_y = np.arange(0.01, 1, 0.01)
 
@@ -201,6 +201,11 @@ class CombinedRocResult:
     num_episodes : int
 
     def __init__(self, y_list, yh_list):
+        valid = [(y, yh) for y, yh in zip(y_list, yh_list)
+                 if not (np.isnan(yh).any() or np.isinf(yh).any())]
+        if not valid:
+            raise ValueError("All episodes have NaN/inf predictions — cannot build ROC curve")
+        y_list, yh_list = zip(*valid)
         roc_curves = fprs, tprs, _ = zip(*[roc_curve(y > 0., yh) \
                                         for y, yh in zip(y_list, yh_list)])
         fpr = np.unique(np.concatenate(fprs))
@@ -330,6 +335,22 @@ def summarize_all_episodes(summary_dir, episode_results, config):
         names = [config.name],
         disabled_modes = ['Train'])
 
+def write_auc_csv(summary_dir, multi_ep_results, configs):
+    """Write per-episode test AUC for every config to summary_dir/auc.csv."""
+    rows = []
+    for config, multi_ep in zip(configs, multi_ep_results):
+        for ep_idx, ep in enumerate(multi_ep.episode_results):
+            test = ep.split_results.get('test')
+            if test is None or len(np.unique(test.y)) < 2 or np.isnan(test.yh).any() or np.isinf(test.yh).any():
+                continue
+            auc = roc_auc_score(test.y, test.yh)
+            rows.append({'config': config.name, 'episode': ep_idx, 'test_auc': auc})
+    df = pd.DataFrame(rows)
+    path = os.path.join(summary_dir, 'auc.csv')
+    df.to_csv(path, index=False)
+    logging.info(f'AUC summary written to {path}')
+
+
 def summarize_all_configurations(summary_dir, multi_ep_results, configs):
     #train, val, test
     _gen_roc_to_file(
@@ -337,4 +358,5 @@ def summarize_all_configurations(summary_dir, multi_ep_results, configs):
         multi_ep_results = multi_ep_results,
         names = [c.name for c in configs],
         disabled_modes = ['Train', 'Val'])
+    write_auc_csv(summary_dir, multi_ep_results, configs)
 

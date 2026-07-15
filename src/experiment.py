@@ -1,3 +1,4 @@
+import os
 import torch
 import numpy as np
 from copy import deepcopy, copy
@@ -84,7 +85,7 @@ class Criteriorator(ABC):
 
     def gen_criteria(self, yh, y):
         ret = self._gen_criteria_func(yh, y)
-        logging.debug(', '.join([f'{c}: {ret[c][0]}' for c in ret.columns]))
+        logging.info(', '.join([f'{c}: {ret[c][0]}' for c in ret.columns]))
         return ret
 
     @abstractmethod
@@ -98,15 +99,19 @@ class Criteriorator(ABC):
 
 class BasicCriteriorator(Criteriorator):
     def __init__(self, loss_func, max_iters, max_grad_norm=None,
-                 kernel_scheduler: KernelScheduler = None):
+                 kernel_scheduler: KernelScheduler = None, patience: int = 500,
+                 grace_period: int = 0):
         self._loss_func = loss_func
         self._max_iters = max_iters
         self.max_grad_norm = max_grad_norm
         self._kernel_scheduler = kernel_scheduler
+        self._patience = patience
+        self._grace_period = grace_period
 
     def init_episode(self):
         self._n_iters = 0
         self._best_loss = np.inf
+        self._epochs_without_improvement = 0
         if self._kernel_scheduler is not None:
             self._kernel_scheduler.reset()
 
@@ -129,10 +134,18 @@ class BasicCriteriorator(Criteriorator):
         self._n_iters += 1
 
         newloss = val_crit.at[0, 'loss']
-        best_flag = newloss < self._best_loss
-        if(best_flag):
-            self._best_loss = newloss
-        stop_flag = self._n_iters >= self._max_iters
+        if self._n_iters > self._grace_period:
+            best_flag = newloss < self._best_loss
+            if best_flag:
+                self._best_loss = newloss
+                self._epochs_without_improvement = 0
+            else:
+                self._epochs_without_improvement += 1
+        else:
+            best_flag = False
+
+        stop_flag = (self._n_iters >= self._max_iters or
+                     self._epochs_without_improvement >= self._patience)
 
         if self._kernel_scheduler is not None:
             self._kernel_scheduler.step()
@@ -141,15 +154,19 @@ class BasicCriteriorator(Criteriorator):
 
 class CRBasedCriteriorator(Criteriorator):
     def __init__(self, loss_func, max_iters, fprs,
-                 kernel_scheduler: KernelScheduler = None):
+                 kernel_scheduler: KernelScheduler = None, patience: int = 500,
+                 grace_period: int = 0):
         self._loss_func = loss_func
         self._max_iters = max_iters
         self._fprs = fprs
         self._kernel_scheduler = kernel_scheduler
+        self._patience = patience
+        self._grace_period = grace_period
 
     def init_episode(self):
         self._n_iters = 0
         self._best_loss = np.inf
+        self._epochs_without_improvement = 0
         self._best_crs = [0 for _ in self._fprs]
         if self._kernel_scheduler is not None:
             self._kernel_scheduler.reset()
@@ -186,10 +203,18 @@ class CRBasedCriteriorator(Criteriorator):
         self._n_iters += 1
 
         newloss = val_crit.at[0, 'loss']
-        best_flag = newloss < self._best_loss
-        if(best_flag):
-            self._best_loss = newloss
-        stop_flag = self._n_iters >= self._max_iters
+        if self._n_iters > self._grace_period:
+            best_flag = newloss < self._best_loss
+            if best_flag:
+                self._best_loss = newloss
+                self._epochs_without_improvement = 0
+            else:
+                self._epochs_without_improvement += 1
+        else:
+            best_flag = False
+
+        stop_flag = (self._n_iters >= self._max_iters or
+                     self._epochs_without_improvement >= self._patience)
 
         if self._kernel_scheduler is not None:
             self._kernel_scheduler.step()
@@ -267,6 +292,28 @@ def get_beta_fpr_at_fprs(yh, y, fprs):
 def get_tpr_at_fpr(yh, y, fpr):
     return get_tpr_at_fprs(yh, y, [fpr])[0]
 
+def get_fpr_at_tpr(yh, y, tpr):
+    yh = np.squeeze(yh if isinstance(yh, np.ndarray) else yh.detach().cpu().numpy())
+    y  = np.squeeze(y  if isinstance(y,  np.ndarray) else y.detach().cpu().numpy())
+    thresh = np.quantile(yh[y > 0], 1 - tpr)
+    return float(np.mean(yh[y == 0] >= thresh))
+
+def write_tpr_summary_csv(summary_dir, conf_list, conf_results, tpr):
+    """Write per-episode FPR@TPR for each config to summary_dir/tpr_summary.csv."""
+    import os
+    rows = []
+    for config, multi_ep in zip(conf_list, conf_results):
+        for ep_idx, ep in enumerate(multi_ep.episode_results):
+            test = ep.split_results.get('test')
+            if test is None:
+                continue
+            fpr = get_fpr_at_tpr(test.yh, test.y, tpr)
+            rows.append({'config': config.name, 'episode': ep_idx, f'fpr_at_tpr{tpr:.2f}': fpr})
+    df = pd.DataFrame(rows)
+    path = os.path.join(summary_dir, 'tpr_summary.csv')
+    df.to_csv(path, index=False)
+    logging.info(f'TPR summary written to {path}')
+
 class ExperimentDataLoader:
     def __init__(
             self,
@@ -310,6 +357,9 @@ class ExperimentDataLoader:
                                    int((n_true / (n_true + n_false)) \
                                        * self._batch_size))
             n_false_per_batch = self._batch_size - n_true_per_batch
+            # clamp so a split smaller than batch_size still yields one batch
+            n_true_per_batch = min(n_true_per_batch, n_true)
+            n_false_per_batch = min(n_false_per_batch, n_false)
 
             while(self._true_index <= n_true - n_true_per_batch and \
                   self._false_index <= n_false - n_false_per_batch):
@@ -353,6 +403,66 @@ def basic_data_splitter(dset, is_oneshot = False, batch_size = 128, is_balanced 
         ExperimentDataLoader(
             dset, test_indeces, batch_size = batch_size, is_shuffle = False, \
             is_oneshot = is_oneshot, is_balanced = is_balanced)
+
+class LabelPoisonedDataset:
+    """Wraps a dataset, appending N mislabeled copies of positives as negatives.
+
+    Only the positives from `pos_train_indices` are duplicated; the rest of the
+    dataset (including val/test indices) is untouched at the tensor level.
+    """
+
+    def __init__(self, base_dataset, pos_train_indices, n_duplicates: int):
+        base_x = base_dataset.x
+        base_y = base_dataset.y
+        pos_x = base_x[pos_train_indices]
+        repeated_x = pos_x.repeat(n_duplicates, *([1] * (pos_x.dim() - 1)))
+        repeated_y = torch.zeros(len(pos_x) * n_duplicates, dtype=base_y.dtype)
+        self.x = torch.cat([base_x, repeated_x], dim=0)
+        self.y = torch.cat([base_y, repeated_y], dim=0)
+        self._n_base = len(base_dataset)
+
+    @property
+    def _poison_indices(self):
+        n_poison = len(self.y) - self._n_base
+        return torch.arange(self._n_base, self._n_base + n_poison)
+
+    def __len__(self):
+        return len(self.x)
+
+    def __getitem__(self, idx):
+        return self.x[idx], self.y[idx]
+
+
+class PoisonedSplitter:
+    """Picklable data_splitter that injects N mislabeled copies of train positives.
+
+    The poisoned copies receive label=0 (false). Val and test splits see the
+    original dataset with no modifications.
+    """
+    def __init__(self, n_duplicates: int, is_oneshot=False, batch_size=128, is_balanced=True):
+        self.n_duplicates = n_duplicates
+        self.is_oneshot = is_oneshot
+        self.batch_size = batch_size
+        self.is_balanced = is_balanced
+
+    def __call__(self, dset):
+        train_idx, val_idx, test_idx = split_dataset_indeces(dset, 0.33, 0.33)
+        train_true_idx = train_idx[dset.y[train_idx].bool()]
+        poisoned = LabelPoisonedDataset(dset, train_true_idx, self.n_duplicates)
+        augmented_train_idx = torch.cat([train_idx, poisoned._poison_indices])
+        loader_kw = dict(batch_size=self.batch_size, is_oneshot=self.is_oneshot,
+                         is_balanced=self.is_balanced)
+        return (
+            ExperimentDataLoader(poisoned, augmented_train_idx, is_shuffle=True, **loader_kw),
+            ExperimentDataLoader(poisoned, val_idx, is_shuffle=False, **loader_kw),
+            ExperimentDataLoader(poisoned, test_idx, is_shuffle=False, **loader_kw),
+        )
+
+
+def make_poisoned_splitter(n_duplicates: int, is_oneshot=False,
+                           batch_size=128, is_balanced=True):
+    return PoisonedSplitter(n_duplicates, is_oneshot, batch_size, is_balanced)
+
 
 def grad_norm(model):
     total_norm = 0.0
@@ -428,7 +538,12 @@ def _perform_episode(
 
     model = config.model_creator_func()
     model.to(device)
-    optim = config.optim_class(params = model.parameters(), **config.optim_args)
+    if config.opt_factory is not None:
+        optim = config.opt_factory(model)
+    else:
+        optim = config.optim_class(params = model.parameters(), **config.optim_args)
+    lr_scheduler = (config.lr_scheduler_class(optim, **config.lr_scheduler_args)
+                    if config.lr_scheduler_class is not None else None)
     epoch_num = 0
 
     run_flag = True
@@ -444,6 +559,8 @@ def _perform_episode(
             _single_epoch(data_loaders['train'],
                         data_loaders['val'], model,
                         optim, criteriorator, device)
+        if lr_scheduler is not None:
+            lr_scheduler.step()
         train_crits.append(train_crit)
         val_crits.append(val_crit)
         epoch_num += 1
@@ -452,6 +569,11 @@ def _perform_episode(
             best_model = deepcopy(model)
             best_epoch = epoch_num
             best_val_crit = val_crit
+    if best_val_crit is None:
+        logging.warning('No best epoch found (loss may be NaN) — using last epoch as fallback')
+        best_val_crit = val_crit
+        best_model = model
+        best_epoch = epoch_num
     logging.info(
         f'Training complete — best epoch: {best_epoch} / {epoch_num}, '
         f'val metrics: {best_val_crit.iloc[0].to_dict()}'
@@ -468,7 +590,10 @@ def _perform_episode(
         split_criteria_epochs = {'train' : train_crits, 'val' : val_crits},
         best_model = best_model)
 
-    summarize_episode(summary_dir, ep_res, config)
+    try:
+        summarize_episode(summary_dir, ep_res, config)
+    except Exception as e:
+        logging.error(f'Summary failed: {e}', exc_info=True)
 
     return ep_res
 
@@ -488,7 +613,8 @@ def _perform_multiple_episodes(
 
     episode_results = None
     if(is_mp):
-        with mp.Pool(N_MP_WORKERS) as mppool:
+        n_workers = config.n_episodes
+        with mp.Pool(n_workers) as mppool:
             result = mppool.starmap_async(
                 _perform_episode, _gen_episodes())
             while not result.ready():
@@ -500,7 +626,10 @@ def _perform_multiple_episodes(
             episode_results.append(_perform_episode(*episode_params))
 
     multi_ep_result = MultiEpisodeResult(episode_results)
-    summarize_all_episodes(summary_dir, multi_ep_result, config)
+    try:
+        summarize_all_episodes(summary_dir, multi_ep_result, config)
+    except Exception as e:
+        logging.error(f'Episode summary failed for {config.name}: {e}', exc_info=True)
     return multi_ep_result
 
 @dataclass
@@ -515,19 +644,38 @@ class ExperimentConfiguration:
     data_splitter : callable = basic_data_splitter
     n_episodes : int = 5
     is_mp : bool = False
+    lr_scheduler_class : type = None
+    lr_scheduler_args : Dict = field(default_factory=dict)
+    opt_factory : callable = None  # opt_factory(model) -> optimizer; overrides optim_class/optim_args
 
-def run_configurations(summary_dir, conf_list, dataset, device = None, is_mp = False):
+def run_configurations(summary_dir, conf_list, dataset, device=None, is_mp=True,
+                       parallel_configs=False, tpr_summary=None):
     if device is None:
         device = get_device()
     logging.info('Starting running configurations!')
-    conf_res = \
-        [_perform_multiple_episodes(
-            summary_dir = joinmakedir(summary_dir, c.name),
-            dataset = dataset,
-            device = device,
-            config = c,
-            is_mp = is_mp) \
-            for c in conf_list]
+
+    if parallel_configs and len(conf_list) > 1:
+        n_workers = min(len(conf_list), os.cpu_count() or 1)
+        logging.info(f'Running {len(conf_list)} configs across {n_workers} workers')
+        args = [
+            (joinmakedir(summary_dir, c.name), dataset, device, c, False)
+            for c in conf_list
+        ]
+        with mp.Pool(n_workers) as pool:
+            result = pool.starmap_async(_perform_multiple_episodes, args)
+            while not result.ready():
+                time.sleep(1)
+            conf_res = result.get()
+    else:
+        conf_res = [
+            _perform_multiple_episodes(
+                summary_dir=joinmakedir(summary_dir, c.name),
+                dataset=dataset, device=device, config=c, is_mp=is_mp)
+            for c in conf_list
+        ]
+
     summarize_all_configurations(summary_dir, conf_res, conf_list)
+    if tpr_summary is not None:
+        write_tpr_summary_csv(summary_dir, conf_list, conf_res, tpr_summary)
 
 oneshot_datasplitter = partial(basic_data_splitter, is_oneshot = True)

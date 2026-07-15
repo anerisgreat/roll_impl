@@ -7,7 +7,7 @@ from torch import nn
 import logging
 
 from src.experiment import run_configurations, basic_data_splitter, \
-    BasicCriteriorator, ExperimentConfiguration
+    BasicCriteriorator, ExperimentConfiguration, KernelScheduler
 from src.datasets import CreditCardFraudDataset
 from src.utils import init_experiment
 from src.roll import kernelized_roll_fpr
@@ -35,29 +35,45 @@ if __name__ == '__main__':
     input_dim = dataset.x.shape[1]
     print(f"Input dimension: {input_dim}, samples: {len(dataset)}")
 
-    def make_net():
-        return Net(input_dim)
+    num_true = dataset.y.sum().item()
+    num_false = (1 - dataset.y).sum().item()
+    imbalance_ratio = num_false / num_true
 
-    configurations = [
-        ExperimentConfiguration(
-            name=f'roll-kernel-{rr:0.2f}',
+    make_net = partial(Net, input_dim)
+
+    def roll_config(name, loss_func):
+        return ExperimentConfiguration(
+            name=name,
             model_creator_func=make_net,
             data_splitter=partial(basic_data_splitter, batch_size=512, is_balanced=True),
             optim_class=torch.optim.Adam,
             optim_args={'lr': 1e-4},
-            criteriorator=BasicCriteriorator(kernelized_roll_fpr(rr), MAX_ITERS),
+            criteriorator=BasicCriteriorator(loss_func, MAX_ITERS,
+                kernel_scheduler=KernelScheduler(initial_gamma=100, decay_every=100)),
             n_episodes=N_EPISODES)
-        for rr in [0.02, 0.05]
-    ] + [ExperimentConfiguration(
-        name='BCE',
-        model_creator_func=make_net,
-        data_splitter=partial(basic_data_splitter, batch_size=512, is_balanced=True),
-        optim_class=torch.optim.Adam,
-        optim_args={'lr': 1e-4},
-        criteriorator=BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), MAX_ITERS),
-        n_episodes=N_EPISODES
-    )]
+
+    def bce_config(name, pos_weight=None):
+        loss = torch.nn.BCEWithLogitsLoss(
+            pos_weight=torch.tensor([pos_weight]) if pos_weight is not None else None)
+        return ExperimentConfiguration(
+            name=name,
+            model_creator_func=make_net,
+            data_splitter=partial(basic_data_splitter, batch_size=512, is_balanced=True),
+            optim_class=torch.optim.Adam,
+            optim_args={'lr': 1e-4},
+            criteriorator=BasicCriteriorator(loss, MAX_ITERS),
+            n_episodes=N_EPISODES)
+
+    fprs = [0.02, 0.05]
+    configurations = (
+        [roll_config(f'roll-{rr:0.2f}', kernelized_roll_fpr(rr)) for rr in fprs] +
+        [roll_config(f'roll+bce-{rr:0.2f}',
+            kernelized_roll_fpr(rr, bce_weight=0.5, bce_pos_weight=imbalance_ratio))
+            for rr in fprs] +
+        [bce_config('bce'),
+         bce_config('bce-weighted', pos_weight=imbalance_ratio)]
+    )
 
     logging.info('Starting experiment!')
-    run_configurations(run_dir, configurations, dataset, is_mp=False)
+    run_configurations(run_dir, configurations, dataset)
     logging.info('Script completed!')

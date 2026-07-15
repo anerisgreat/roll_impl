@@ -17,8 +17,8 @@ from src.datasets import AdultDataset
 from src.utils import init_experiment
 from src.roll import roll_loss_from_fpr, roll_beta_loss_from_fpr, roll_beta_aoc_loss, kernelized_roll_fpr, kernelized_roll_tpr
 
-MAX_ITERS = 10000
-N_EPISODES = 3
+MAX_ITERS = 5000
+N_EPISODES = 1
 
 class MyNet(nn.Module):
     def __init__(self, dropout: float = 0.1):
@@ -38,40 +38,40 @@ class MyNet(nn.Module):
 
 if __name__ == '__main__':
     run_dir = init_experiment('results', 'adult')
-    # configurations = [ ExperimentConfiguration(
-    #             name = f'beta-roll-{rr:0.2f}',
-    #             model_creator_func = MyNet,
-    #             data_splitter = partial(basic_data_splitter, is_oneshot = False, batch_size = 512),
-    #             optim_class = torch.optim.RMSprop,
-    #             optim_args = {'lr' : 0.01},
-    #             criteriorator = CRBasedCriteriorator(
-    #                 roll_beta_loss_from_fpr(rr), MAX_ITERS, [rr]),
-    #             n_episodes = N_EPISODES) \
-    #         for rr in [0.05, 0.1, 0.2]
-        # ] + [
+    dataset = AdultDataset()
+
+    num_true = dataset.y.sum().item()
+    num_false = (1 - dataset.y).sum().item()
+    imbalance_weight = torch.tensor([num_false / num_true])
+
+    def roll_config(name, loss_func):
+        return ExperimentConfiguration(
+            name=name,
+            model_creator_func=partial(MyNet, dropout=0.2),
+            data_splitter=partial(basic_data_splitter, is_oneshot=False, batch_size=2048, is_balanced=True),
+            optim_class=torch.optim.Adam,
+            optim_args={'lr': 1e-3, 'weight_decay': 1e-4},
+            criteriorator=BasicCriteriorator(loss_func, MAX_ITERS, 5.0,
+                kernel_scheduler=KernelScheduler(initial_gamma=100, decay_every=100)),
+            n_episodes=N_EPISODES)
+
+    def bce_config(name, pos_weight=None):
+        loss = torch.nn.BCEWithLogitsLoss(
+            pos_weight=pos_weight.clone() if pos_weight is not None else None)
+        return ExperimentConfiguration(
+            name=name,
+            model_creator_func=partial(MyNet, dropout=0.2),
+            data_splitter=partial(basic_data_splitter, batch_size=2048, is_oneshot=False, is_balanced=True),
+            optim_class=torch.optim.Adam,
+            optim_args={'lr': 1e-3, 'weight_decay': 1e-4},
+            criteriorator=BasicCriteriorator(loss, MAX_ITERS),
+            n_episodes=N_EPISODES)
+
     configurations = [
-        ExperimentConfiguration(
-            name = f'GR{str(optim.__name__)}',
-            model_creator_func = partial(MyNet, dropout=0.2),
-            data_splitter = partial(basic_data_splitter, is_oneshot = False, batch_size = 2048, is_balanced = True),
-            optim_class = optim,
-            optim_args = {'lr' : 0.00001, 'weight_decay' : 1e-4},
-            criteriorator = BasicCriteriorator(kernelized_roll_tpr(0.95), MAX_ITERS, 5.0, kernel_scheduler = KernelScheduler(decay_every = 500)),
-            n_episodes = N_EPISODES) for optim in [
-                torch.optim.Adam,
-            ]] + [
-            ExperimentConfiguration(
-            name = 'BCE',
-            model_creator_func = partial(MyNet, dropout=0.2),
-            data_splitter = partial(basic_data_splitter, batch_size = 2048, is_oneshot = False),
-            optim_class = torch.optim.RMSprop,
-            optim_args = {'lr' : 0.00001, 'weight_decay' : 1e-4},
-            criteriorator = BasicCriteriorator(torch.nn.BCEWithLogitsLoss(), MAX_ITERS),
-            n_episodes = N_EPISODES),
-        ]
+        roll_config('roll+bce-weighted',
+            kernelized_roll_tpr(0.95, bce_weight=0.5, bce_pos_weight=num_false / num_true)),
+    ]
 
     logging.info('Starting experiment!')
-
-    run_configurations(run_dir, configurations, AdultDataset(), is_mp = False)
-
+    run_configurations(run_dir, configurations, dataset)
     logging.info('Script completed!')

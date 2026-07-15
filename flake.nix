@@ -238,6 +238,18 @@
                         propagatedBuildInputs = [numpy scipy cython];
                     })
 
+                    ( buildPythonPackage rec {
+                        pname = "libauc";
+                        version = "2.0.1";
+                        src = fetchPypi {
+                            inherit pname version;
+                            sha256 = "sha256-3Tuhk0elQIEgCjnSOlYqxieV+rdvmZRhGAcgpAJswmw=";
+                        };
+
+                        propagatedBuildInputs = [pytorch numpy tqdm];
+                        doCheck = false;
+                    })
+
                 ]))];
             shellHook = fullShellHookString;
         };
