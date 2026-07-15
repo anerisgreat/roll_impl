@@ -223,7 +223,7 @@ class KernelizedROLLoss(Function):
         if normalize:
             score_scale = 1 / torch.sqrt(torch.var(yh, correction=1).clamp(min=1e-8))
         else:
-            score_scale = torch.tensor(1.0)
+            score_scale = torch.tensor(1.0, device=yh.device)
         yh_norm = yh * score_scale
 
         pos_idx, neg_idx = split_true_false_indeces(yh, y)
@@ -232,8 +232,8 @@ class KernelizedROLLoss(Function):
 
         # Bandwidths via ISJ; fall back to Silverman on convergence failure.
         # gamma > 1 widens kernels early in training  [sec:kde-bandwidth-scaling].
-        v0 = torch.tensor(_bandwidth(scores_neg.numpy().astype(np.float64))) / gamma
-        v1 = torch.tensor(_bandwidth(scores_pos.numpy().astype(np.float64))) / gamma
+        v0 = (torch.tensor(_bandwidth(scores_neg.cpu().numpy().astype(np.float64))) / gamma).to(yh.device)
+        v1 = (torch.tensor(_bandwidth(scores_pos.cpu().numpy().astype(np.float64))) / gamma).to(yh.device)
 
         # τ_k = F̂_0^{−1}(alpha_k): threshold where the negative-class CDF equals alpha_k.
         # Callers pass alpha_k = 1 − FPR_k so that P(neg-score > τ_k) = FPR_k  [eq:roll-tpr-at-fpr].
@@ -284,7 +284,7 @@ class KernelizedROLLoss(Function):
         # ∂(Σ_k loss_k)/∂s_i^(0) = Σ_k dF1_dtau_k · ∂tau_k/∂s_i^(0)  [eq:kde-grad-combined]
         grad_neg = (dF1_dtau.unsqueeze(1) * grad_tau_neg).sum(dim=0) / divisor  # (n0,)
 
-        grad_input = torch.zeros(yh.shape[0])
+        grad_input = torch.zeros(yh.shape[0], device=yh.device)
         grad_input[pos_idx] = grad_pos * grad_output
         grad_input[neg_idx] = grad_neg * grad_output
 

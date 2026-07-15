@@ -652,6 +652,9 @@ def run_configurations(summary_dir, conf_list, dataset, device=None, is_mp=True,
                        parallel_configs=False, tpr_summary=None):
     if device is None:
         device = get_device()
+    if device.type == 'mps' and is_mp:
+        logging.info('Disabling multiprocessing: MPS tensors cannot be shared between processes')
+        is_mp = False
     logging.info('Starting running configurations!')
 
     if parallel_configs and len(conf_list) > 1:

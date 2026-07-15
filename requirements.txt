@@ -5,4 +5,7 @@ torchvision
 plotly
 scikit-learn
 matplotlib
+pandas
 adult-dataset
+KDEpy
+libauc==2.0.1

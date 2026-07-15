@@ -191,6 +191,7 @@
     in{
         devShells.${system}.default = pkgs.mkShell {
           buildInputs = with pkgs; [
+               sshpass
                (pkgs.python3.withPackages (python-pkgs: with python-pkgs; [
                     numpy
                     pytorch

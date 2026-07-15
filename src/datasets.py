@@ -14,7 +14,7 @@ import torchvision.transforms as transforms
 
 class ForestCoverDataset:
     def __init__(self):
-        PATH = '/home/aner/.data/forestcover/cover.mat'
+        PATH = os.path.expanduser('~/.data/forestcover/cover.mat')
 
         mat = scipy.io.loadmat(PATH)
 
@@ -34,7 +34,7 @@ class ForestCoverDataset:
 
 class Cifar10Dataset:
     def __init__(self):
-        PATH = '/home/aner/.data/cifar10'
+        PATH = os.path.expanduser('~/.data/cifar10')
         self._transform = transforms.Compose(
             [transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
@@ -173,6 +173,90 @@ def get_keel_dataset():
 
     print("Attributes:", attributes)
     print("Data (first 5 rows):", data[:5])
+
+
+class Cifar10NDataset:
+    """CIFAR-10 with human-annotated noisy labels (UCSC-REAL/cifar-10-100n).
+
+    noise_type: 'clean' | 'aggre' | 'worse' | 'rand1' | 'rand2' | 'rand3'
+    positive_class: which CIFAR-10 class is the positive label (default 1 = automobile)
+    """
+    _URL = 'https://github.com/UCSC-REAL/cifar-10-100n/raw/main/data/CIFAR-10_human.pt'
+    _KEYS = {
+        'clean': 'clean_label',
+        'aggre': 'aggre_label',
+        'worse': 'worse_label',
+        'rand1': 'random_label1',
+        'rand2': 'random_label2',
+        'rand3': 'random_label3',
+    }
+
+    def __init__(self, noise_type='aggre', positive_class=1):
+        import urllib.request
+        cifar_path = os.path.expanduser('~/.data/cifar10')
+        labels_path = os.path.expanduser('~/.data/cifar10n/CIFAR-10_human.pt')
+
+        os.makedirs(os.path.dirname(labels_path), exist_ok=True)
+        if not os.path.exists(labels_path):
+            print(f'Downloading CIFAR-10N labels from {self._URL} ...')
+            urllib.request.urlretrieve(self._URL, labels_path)
+
+        dset = torchvision.datasets.CIFAR10(root=cifar_path, train=True, download=True)
+        noise_labels = torch.load(labels_path, weights_only=False)
+        labels = noise_labels[self._KEYS[noise_type]]  # numpy array, shape (50000,)
+
+        self.x = torch.tensor(dset.data / 255.0, dtype=torch.float32).permute(0, 3, 1, 2)
+        self.y = torch.tensor(labels == positive_class, dtype=torch.float32)
+
+    def __getitem__(self, i):
+        return self.x[i], self.y[i]
+
+    def __len__(self):
+        return len(self.x)
+
+
+class ImbalancedCifar10Dataset:
+    """CIFAR-10 binary with a controlled imbalance ratio (IR = n_neg / n_pos).
+
+    Positive class is subsampled (if needed) so that n_neg / n_pos ≈ target_ir.
+    Natural IR with binary class-vs-rest is ~9; use target_ir > 9 for harder setups.
+    positive_class: which CIFAR-10 class is the positive label (default 1 = automobile)
+    seed: for reproducible subsampling
+    """
+
+    def __init__(self, target_ir=100, positive_class=1, seed=42):
+        PATH = os.path.expanduser('~/.data/cifar10')
+        dset = torchvision.datasets.CIFAR10(root=PATH, train=True, download=True)
+
+        targets = np.array(dset.targets)
+        rng = np.random.default_rng(seed)
+
+        pos_idx = np.where(targets == positive_class)[0]
+        neg_idx = np.where(targets != positive_class)[0]
+
+        # Decide how many of each class to keep
+        n_pos_all, n_neg_all = len(pos_idx), len(neg_idx)
+        n_neg_target = int(n_pos_all * target_ir)
+
+        if n_neg_target <= n_neg_all:
+            # Enough negatives: subsample negatives
+            neg_idx = rng.choice(neg_idx, n_neg_target, replace=False)
+        else:
+            # Not enough negatives: fix all negatives, subsample positives
+            n_pos_target = max(1, int(n_neg_all / target_ir))
+            pos_idx = rng.choice(pos_idx, n_pos_target, replace=False)
+
+        idx = np.concatenate([pos_idx, neg_idx])
+        rng.shuffle(idx)
+
+        self.x = torch.tensor(dset.data[idx] / 255.0, dtype=torch.float32).permute(0, 3, 1, 2)
+        self.y = torch.tensor(targets[idx] == positive_class, dtype=torch.float32)
+
+    def __getitem__(self, i):
+        return self.x[i], self.y[i]
+
+    def __len__(self):
+        return len(self.x)
 
 
 class BankMarketingDataset:
