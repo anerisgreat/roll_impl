@@ -2,6 +2,38 @@ import torch
 from torch import nn
 
 
+class ConvNet(nn.Module):
+    """Small CNN for RGB images.
+
+    Three conv blocks (Conv→BN→ReLU→MaxPool2d) reduce spatial dims by 8×,
+    then two FC layers → scalar logit.
+
+    image_size=32 (CIFAR): 64*4*4=1024 features.
+    image_size=64 (ANIMAL-10N, Food-101N): 64*8*8=4096 features.
+    """
+    def __init__(self, image_size=32):
+        super().__init__()
+        feature_size = 64 * (image_size // 8) ** 2
+        block = lambda c_in, c_out: [
+            nn.Conv2d(c_in, c_out, 3, padding=1),
+            nn.BatchNorm2d(c_out),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+        ]
+        self._layers = nn.Sequential(
+            *block(3, 32),
+            *block(32, 64),
+            *block(64, 64),
+            nn.Flatten(),
+            nn.Linear(feature_size, 128),
+            nn.ReLU(),
+            nn.Linear(128, 1),
+        )
+
+    def forward(self, x):
+        return self._layers(x).squeeze(1)
+
+
 class KeelNet(nn.Module):
     """
     Parameterized MLP for KEEL imbalanced datasets.

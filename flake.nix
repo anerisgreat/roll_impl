@@ -186,12 +186,17 @@
         export uci_higgs_dir=${higgsDerivation};
         export credit_card_fraud_dir=$HOME/.data/creditcard;
         export home_credit_dir=$HOME/.data/homecredit;
+        export MLFLOW_TRACKING_URI=https://mlflow.zakobar.com;
+        export MLFLOW_TRACKING_USERNAME=admin;
+        export MLFLOW_TRACKING_PASSWORD=ioS4YfeIsca8v3K6eQvrY6Kte;
+        export LD_LIBRARY_PATH=/usr/lib/wsl/lib:$LD_LIBRARY_PATH;
       '';
       fullShellHookString = keelShellHookString + "\n" + uciShellHookString + "\n" + manualDatasetsShellHookString;
     in{
         devShells.${system}.default = pkgs.mkShell {
           buildInputs = with pkgs; [
                sshpass
+               kaggle
                (pkgs.python3.withPackages (python-pkgs: with python-pkgs; [
                     numpy
                     pytorch
@@ -224,8 +229,7 @@
 
                         propagatedBuildInputs = [flit pytorch numpy pandas];
                         format="pyproject";
-                        patches =
-                            (o.patches or []) ++ [./adult-dataset-numpy-version.patch];
+                        patches = [./adult-dataset-numpy-version.patch];
 
                     })
                     ( buildPythonPackage rec {
@@ -248,6 +252,24 @@
                         };
 
                         propagatedBuildInputs = [pytorch numpy tqdm];
+                        doCheck = false;
+                    })
+
+                    mlflow
+
+                    imageio
+                    scikit-image
+
+                    ( buildPythonPackage rec {
+                        pname = "torchxrayvision";
+                        version = "1.5.2";
+                        src = fetchPypi {
+                            inherit pname version;
+                            sha256 = "sha256-TS+y9s7GRLWSctQOA9RJ3citKAOknM7h//rS5lK9Oi4=";
+                        };
+
+                        propagatedBuildInputs = [pytorch torchvision numpy scipy scikit-learn];
+                        preBuild = "touch requirements.txt";
                         doCheck = false;
                     })
 

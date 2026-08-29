@@ -1,4 +1,5 @@
 import os
+import sys
 import torch
 import numpy as np
 from copy import deepcopy, copy
@@ -16,6 +17,7 @@ from numpy.typing import NDArray
 
 from .utils import joinmakedir, get_device
 from .summary import summarize_episode, summarize_all_episodes, summarize_all_configurations
+from .mlflow_tracker import make_mlflow_run
 
 N_MP_WORKERS = 4
 
@@ -85,7 +87,7 @@ class Criteriorator(ABC):
 
     def gen_criteria(self, yh, y):
         ret = self._gen_criteria_func(yh, y)
-        logging.info(', '.join([f'{c}: {ret[c][0]}' for c in ret.columns]))
+        logging.debug(', '.join([f'{c}: {ret[c][0]}' for c in ret.columns]))
         return ret
 
     @abstractmethod
@@ -116,6 +118,8 @@ class BasicCriteriorator(Criteriorator):
             self._kernel_scheduler.reset()
 
     def loss_func(self, yh, y):
+        if hasattr(self._loss_func, 'to'):
+            self._loss_func.to(yh.device)
         if self._kernel_scheduler is not None:
             return self._loss_func(yh, y, gamma=self._kernel_scheduler.gamma)
         return self._loss_func(yh, y)
@@ -172,6 +176,8 @@ class CRBasedCriteriorator(Criteriorator):
             self._kernel_scheduler.reset()
 
     def loss_func(self, yh, y):
+        if hasattr(self._loss_func, 'to'):
+            self._loss_func.to(yh.device)
         if self._kernel_scheduler is not None:
             return self._loss_func(yh, y, gamma=self._kernel_scheduler.gamma)
         return self._loss_func(yh, y)
@@ -327,12 +333,10 @@ class ExperimentDataLoader:
         self._is_oneshot = is_oneshot
         self._is_shuffle = is_shuffle
 
-        self._true_indeces = self._indeces[torch.argwhere(
-                self._dset[self._indeces][1]
-            ).flatten()]
+        y_split = self._dset.y[self._indeces]
+        self._true_indeces = self._indeces[torch.argwhere(y_split).flatten()]
         self._false_indeces = self._indeces[torch.argwhere(
-                torch.logical_not(self._dset[self._indeces][1])
-            ).flatten()]
+                torch.logical_not(y_split)).flatten()]
 
     def __iter__(self):
         if(self._is_oneshot):
@@ -342,9 +346,10 @@ class ExperimentDataLoader:
 
         if(self._is_shuffle):
             self._indeces = self._indeces[torch.randperm(len(self._indeces))]
-            self._true_indeces = self._indeces[torch.argwhere(self._dset[self._indeces][1]).flatten()]
+            y_split = self._dset.y[self._indeces]
+            self._true_indeces = self._indeces[torch.argwhere(y_split).flatten()]
             self._false_indeces = self._indeces[torch.argwhere(
-                torch.logical_not(self._dset[self._indeces][1])).flatten()]
+                torch.logical_not(y_split)).flatten()]
 
         self._true_index = 0
         self._false_index = 0
@@ -404,6 +409,118 @@ def basic_data_splitter(dset, is_oneshot = False, batch_size = 128, is_balanced 
             dset, test_indeces, batch_size = batch_size, is_shuffle = False, \
             is_oneshot = is_oneshot, is_balanced = is_balanced)
 
+class ShuffledSplitter:
+    """Stratified splitter that shuffles indices before splitting, seeded by call count.
+
+    Each call corresponds to one episode. The seed equals the call count, so
+    episode N always produces the same shuffle regardless of which config calls
+    it — as long as every config starts from its own fresh instance (call_count=0).
+    Create one instance per config via make_shuffled_splitter().
+    """
+    def __init__(self, is_oneshot=False, batch_size=128, is_balanced=True):
+        self.is_oneshot = is_oneshot
+        self.batch_size = batch_size
+        self.is_balanced = is_balanced
+        self._call_count = 0
+
+    def __call__(self, dset):
+        seed = self._call_count
+        self._call_count += 1
+
+        y = dset.y
+        gen = torch.Generator()
+        gen.manual_seed(seed)
+
+        true_indeces = torch.argwhere(y)[:, 0]
+        false_indeces = torch.argwhere(torch.logical_not(y))[:, 0]
+
+        true_indeces = true_indeces[torch.randperm(len(true_indeces), generator=gen)]
+        false_indeces = false_indeces[torch.randperm(len(false_indeces), generator=gen)]
+
+        true_train, true_val, true_test = split_indeces(true_indeces, 0.33, 0.33)
+        false_train, false_val, false_test = split_indeces(false_indeces, 0.33, 0.33)
+
+        train_idx = torch.cat((false_train, true_train))
+        val_idx   = torch.cat((false_val,   true_val))
+        test_idx  = torch.cat((false_test,  true_test))
+
+        kw = dict(batch_size=self.batch_size, is_oneshot=self.is_oneshot,
+                  is_balanced=self.is_balanced)
+        return (
+            ExperimentDataLoader(dset, train_idx, is_shuffle=True,  **kw),
+            ExperimentDataLoader(dset, val_idx,   is_shuffle=False, **kw),
+            ExperimentDataLoader(dset, test_idx,  is_shuffle=False, **kw),
+        )
+
+
+def make_shuffled_splitter(is_oneshot=False, batch_size=128, is_balanced=True):
+    """Return a fresh ShuffledSplitter instance. Call once per config."""
+    return ShuffledSplitter(is_oneshot, batch_size, is_balanced)
+
+
+class LabelNoisyDataset:
+    """Wraps a dataset with randomly flipped labels for the given indices.
+
+    Only the specified indices have their labels potentially flipped; all others
+    (e.g. test indices) retain original labels.
+    """
+    def __init__(self, base_dataset, noisy_indices, noise_rate: float, generator: torch.Generator):
+        self.x = base_dataset.x
+        y = base_dataset.y.clone()
+        flip_mask = torch.bernoulli(
+            torch.full((len(noisy_indices),), noise_rate), generator=generator
+        ).bool()
+        y[noisy_indices[flip_mask]] = 1 - y[noisy_indices[flip_mask]]
+        self.y = y
+
+    def __len__(self):
+        return len(self.x)
+
+    def __getitem__(self, idx):
+        return self.x[idx], self.y[idx]
+
+
+class NoisySplitter:
+    """Picklable data_splitter that flips noise_rate fraction of train and val labels.
+
+    Noise is seeded by episode index (call counter) for per-episode variation while
+    remaining consistent across configs. Each config should get its own instance.
+    Test split always sees the original clean labels.
+    """
+    def __init__(self, noise_rate: float = 0.05, is_oneshot=False, batch_size=128, is_balanced=True):
+        self.noise_rate = noise_rate
+        self.is_oneshot = is_oneshot
+        self.batch_size = batch_size
+        self.is_balanced = is_balanced
+        self._split_cache = None  # (train_idx, val_idx, test_idx)
+        self._call_count = 0
+
+    def __call__(self, dset):
+        if self._split_cache is None:
+            self._split_cache = split_dataset_indeces(dset, 0.33, 0.33)
+
+        train_idx, val_idx, test_idx = self._split_cache
+        gen = torch.Generator()
+        gen.manual_seed(self._call_count)
+        self._call_count += 1
+
+        noisy_indices = torch.cat([train_idx, val_idx])
+        noisy_dset = LabelNoisyDataset(dset, noisy_indices, self.noise_rate, gen)
+
+        kw = dict(batch_size=self.batch_size, is_oneshot=self.is_oneshot,
+                  is_balanced=self.is_balanced)
+        return (
+            ExperimentDataLoader(noisy_dset, train_idx, is_shuffle=True, **kw),
+            ExperimentDataLoader(noisy_dset, val_idx, is_shuffle=False, **kw),
+            ExperimentDataLoader(dset, test_idx, is_shuffle=False, **kw),
+        )
+
+
+def make_noisy_splitter(noise_rate: float = 0.05, is_oneshot=False,
+                        batch_size=128, is_balanced=True):
+    return NoisySplitter(noise_rate, is_oneshot, batch_size, is_balanced)
+
+
 class LabelPoisonedDataset:
     """Wraps a dataset, appending N mislabeled copies of positives as negatives.
 
@@ -411,12 +528,12 @@ class LabelPoisonedDataset:
     dataset (including val/test indices) is untouched at the tensor level.
     """
 
-    def __init__(self, base_dataset, pos_train_indices, n_duplicates: int):
+    def __init__(self, base_dataset, pos_train_indices, counts: torch.Tensor):
         base_x = base_dataset.x
         base_y = base_dataset.y
         pos_x = base_x[pos_train_indices]
-        repeated_x = pos_x.repeat(n_duplicates, *([1] * (pos_x.dim() - 1)))
-        repeated_y = torch.zeros(len(pos_x) * n_duplicates, dtype=base_y.dtype)
+        repeated_x = pos_x.repeat_interleave(counts, dim=0)
+        repeated_y = torch.zeros(int(counts.sum().item()), dtype=base_y.dtype)
         self.x = torch.cat([base_x, repeated_x], dim=0)
         self.y = torch.cat([base_y, repeated_y], dim=0)
         self._n_base = len(base_dataset)
@@ -434,10 +551,9 @@ class LabelPoisonedDataset:
 
 
 class PoisonedSplitter:
-    """Picklable data_splitter that injects N mislabeled copies of train positives.
+    """Picklable data_splitter that injects N mislabeled copies of train and val positives.
 
-    The poisoned copies receive label=0 (false). Val and test splits see the
-    original dataset with no modifications.
+    The poisoned copies receive label=0 (false). Test split sees the original dataset only.
     """
     def __init__(self, n_duplicates: int, is_oneshot=False, batch_size=128, is_balanced=True):
         self.n_duplicates = n_duplicates
@@ -448,13 +564,22 @@ class PoisonedSplitter:
     def __call__(self, dset):
         train_idx, val_idx, test_idx = split_dataset_indeces(dset, 0.33, 0.33)
         train_true_idx = train_idx[dset.y[train_idx].bool()]
-        poisoned = LabelPoisonedDataset(dset, train_true_idx, self.n_duplicates)
-        augmented_train_idx = torch.cat([train_idx, poisoned._poison_indices])
+        val_true_idx = val_idx[dset.y[val_idx].bool()]
+        train_counts = torch.full((len(train_true_idx),), self.n_duplicates, dtype=torch.long)
+        val_counts = torch.full((len(val_true_idx),), self.n_duplicates, dtype=torch.long)
+        poisoned = LabelPoisonedDataset(dset, torch.cat([train_true_idx, val_true_idx]),
+                                        torch.cat([train_counts, val_counts]))
+        n_base = len(dset)
+        n_train_poison = int(train_counts.sum().item())
+        n_val_poison = int(val_counts.sum().item())
+        aug_train_idx = torch.cat([train_idx, torch.arange(n_base, n_base + n_train_poison)])
+        aug_val_idx = torch.cat([val_idx, torch.arange(n_base + n_train_poison,
+                                                        n_base + n_train_poison + n_val_poison)])
         loader_kw = dict(batch_size=self.batch_size, is_oneshot=self.is_oneshot,
                          is_balanced=self.is_balanced)
         return (
-            ExperimentDataLoader(poisoned, augmented_train_idx, is_shuffle=True, **loader_kw),
-            ExperimentDataLoader(poisoned, val_idx, is_shuffle=False, **loader_kw),
+            ExperimentDataLoader(poisoned, aug_train_idx, is_shuffle=True, **loader_kw),
+            ExperimentDataLoader(poisoned, aug_val_idx, is_shuffle=False, **loader_kw),
             ExperimentDataLoader(poisoned, test_idx, is_shuffle=False, **loader_kw),
         )
 
@@ -462,6 +587,60 @@ class PoisonedSplitter:
 def make_poisoned_splitter(n_duplicates: int, is_oneshot=False,
                            batch_size=128, is_balanced=True):
     return PoisonedSplitter(n_duplicates, is_oneshot, batch_size, is_balanced)
+
+
+class RandomPoisonedSplitter:
+    """Picklable data_splitter with per-episode random poison counts, consistent across configs.
+
+    Each train and val positive receives a count drawn from Uniform(0, n_max) inclusive.
+    Counts are seeded by the episode index (call counter), so episode N always produces
+    the same counts regardless of which config calls it. Since splits are deterministic,
+    two instances of this class will produce identical data for the same episode.
+    Each config should get its own instance so the counter starts at 0.
+    Test split sees the original dataset only.
+    """
+    def __init__(self, n_max: int, is_oneshot=False, batch_size=128, is_balanced=True):
+        self.n_max = n_max
+        self.is_oneshot = is_oneshot
+        self.batch_size = batch_size
+        self.is_balanced = is_balanced
+        self._split_cache = None  # (train_idx, val_idx, test_idx, train_true_idx, val_true_idx)
+        self._call_count = 0
+
+    def __call__(self, dset):
+        if self._split_cache is None:
+            train_idx, val_idx, test_idx = split_dataset_indeces(dset, 0.33, 0.33)
+            train_true_idx = train_idx[dset.y[train_idx].bool()]
+            val_true_idx = val_idx[dset.y[val_idx].bool()]
+            self._split_cache = (train_idx, val_idx, test_idx, train_true_idx, val_true_idx)
+
+        train_idx, val_idx, test_idx, train_true_idx, val_true_idx = self._split_cache
+        gen = torch.Generator()
+        gen.manual_seed(self._call_count)
+        self._call_count += 1
+
+        train_counts = torch.randint(0, self.n_max + 1, (len(train_true_idx),), generator=gen)
+        val_counts = torch.randint(0, self.n_max + 1, (len(val_true_idx),), generator=gen)
+        poisoned = LabelPoisonedDataset(dset, torch.cat([train_true_idx, val_true_idx]),
+                                        torch.cat([train_counts, val_counts]))
+        n_base = len(dset)
+        n_train_poison = int(train_counts.sum().item())
+        n_val_poison = int(val_counts.sum().item())
+        aug_train_idx = torch.cat([train_idx, torch.arange(n_base, n_base + n_train_poison)])
+        aug_val_idx = torch.cat([val_idx, torch.arange(n_base + n_train_poison,
+                                                        n_base + n_train_poison + n_val_poison)])
+        kw = dict(batch_size=self.batch_size, is_oneshot=self.is_oneshot,
+                  is_balanced=self.is_balanced)
+        return (
+            ExperimentDataLoader(poisoned, aug_train_idx, is_shuffle=True, **kw),
+            ExperimentDataLoader(poisoned, aug_val_idx, is_shuffle=False, **kw),
+            ExperimentDataLoader(poisoned, test_idx, is_shuffle=False, **kw),
+        )
+
+
+def make_random_poisoned_splitter(n_max: int, is_oneshot=False,
+                                   batch_size=128, is_balanced=True):
+    return RandomPoisonedSplitter(n_max, is_oneshot, batch_size, is_balanced)
 
 
 def grad_norm(model):
@@ -478,26 +657,29 @@ def _single_run_dset(loader, model, optim, criteriorator, device, is_train,
     yh_list = []
     y_list = []
 
-    for bx, by in loader:
-        if(is_train):
-            optim.zero_grad()
+    def _run_batch(bx, by):
         bx = bx.to(device)
         by = by.to(device)
         byh = model(bx)
         loss = criteriorator.loss_func(byh, by)
-        if(is_train):
+        if is_train:
             loss.backward()
-            # ----- CLIP GRADIENTS -----
-            # logging.debug(f'Grad norm (model):\t{grad_norm(model)}')
             if criteriorator.max_grad_norm is not None:
                 torch.nn.utils.clip_grad_norm_(model.parameters(),
                                                criteriorator.max_grad_norm)
-
             optim.step()
-
         loss_list.append(loss.item())
-        yh_list.append(byh)
-        y_list.append(by)
+        yh_list.append(byh.detach())
+        y_list.append(by.detach())
+
+    if is_train:
+        for bx, by in loader:
+            optim.zero_grad()
+            _run_batch(bx, by)
+    else:
+        with torch.no_grad():
+            for bx, by in loader:
+                _run_batch(bx, by)
 
     all_yh = torch.cat(yh_list)
     all_y = torch.cat(y_list)
@@ -533,6 +715,29 @@ def _perform_episode(
         summary_dir,
         data_loaders,
         logger, device, config):
+    # Derive dataset name and episode index from the directory structure:
+    # summary_dir = .../results-final/<dataset>/<config>/<episode>
+    _parts = os.path.normpath(summary_dir).split(os.sep)
+    _episode_idx = int(_parts[-1]) if _parts[-1].isdigit() else 0
+    _dataset_name = _parts[-3] if len(_parts) >= 3 else 'unknown'
+
+    _tracker = make_mlflow_run(
+        experiment_name=_dataset_name,
+        config=config.name,
+        dataset=_dataset_name,
+        episode=_episode_idx,
+        device=str(device),
+    )
+    _hparams = {}
+    if config.opt_factory is None and config.optim_class is not None:
+        _hparams['optim'] = config.optim_class.__name__
+        _hparams.update(config.optim_args)
+    if hasattr(config.criteriorator, '_max_iters'):
+        _hparams['max_iters'] = config.criteriorator._max_iters
+    if hasattr(config.criteriorator, '_patience'):
+        _hparams['patience'] = config.criteriorator._patience
+    _tracker['hparams'] = _hparams
+
     train_losses = []
     val_losses = []
 
@@ -563,6 +768,12 @@ def _perform_episode(
             lr_scheduler.step()
         train_crits.append(train_crit)
         val_crits.append(val_crit)
+        for col in train_crit.columns:
+            _tracker.track(float(train_crit.at[0, col]), name=col, step=epoch_num,
+                           context={'split': 'train'})
+        for col in val_crit.columns:
+            _tracker.track(float(val_crit.at[0, col]), name=col, step=epoch_num,
+                           context={'split': 'val'})
         epoch_num += 1
         run_flag = not stop_flag
         if(best_flag):
@@ -591,14 +802,80 @@ def _perform_episode(
         best_model = best_model)
 
     try:
+        from sklearn.metrics import roc_auc_score
+        for split_name, split_res in results.items():
+            auc = float(roc_auc_score(split_res.y, split_res.yh))
+            _tracker.track(auc, name='auc', step=0, context={'split': split_name})
+    except Exception:
+        pass
+    _tracker.close()
+
+    try:
         summarize_episode(summary_dir, ep_res, config)
     except Exception as e:
         logging.error(f'Summary failed: {e}', exc_info=True)
 
     return ep_res
 
+def _perform_multiple_episodes_subprocess(summary_dir, dataset, device, config):
+    """Run each episode as an independent subprocess — MPS-safe parallelism.
+
+    Pickles config and dataset to temp files, spawns one process per episode,
+    waits for all to finish, then reloads EpisodeResults from the saved pkls.
+    """
+    import tempfile, subprocess, pickle as pkl
+
+    with tempfile.NamedTemporaryFile(suffix='.pkl', delete=False) as f:
+        pkl.dump(config, f)
+        config_path = f.name
+    with tempfile.NamedTemporaryFile(suffix='.pkl', delete=False) as f:
+        pkl.dump(dataset, f)
+        dataset_path = f.name
+
+    procs = []
+    log_files = []
+    try:
+        for ep_idx in range(config.n_episodes):
+            ep_dir = joinmakedir(summary_dir, str(ep_idx))
+            log_path = os.path.join(ep_dir, 'worker.log')
+            lf = open(log_path, 'w')
+            log_files.append(lf)
+            logging.info(f'{ep_idx:3d} - {config.name} [subprocess]')
+            p = subprocess.Popen(
+                [sys.executable, '-m', 'src._episode_worker',
+                 config_path, dataset_path, str(ep_idx), summary_dir, str(device)],
+                cwd=os.path.join(os.path.dirname(__file__), '..'),
+                stdout=lf, stderr=lf,
+            )
+            procs.append(p)
+
+        for ep_idx, p in enumerate(procs):
+            ret = p.wait()
+            log_files[ep_idx].flush()
+            if ret != 0:
+                log_path = os.path.join(summary_dir, str(ep_idx), 'worker.log')
+                logging.error(
+                    f'Episode worker {ep_idx} exited with code {ret} '
+                    f'(see {log_path})'
+                )
+    finally:
+        for lf in log_files:
+            lf.close()
+        os.unlink(config_path)
+        os.unlink(dataset_path)
+
+    # Reload results saved by each worker
+    episode_results = []
+    for ep_idx in range(config.n_episodes):
+        ep_dir = os.path.join(summary_dir, str(ep_idx))
+        pkl_path = os.path.join(ep_dir, 'test-res.pkl')
+        with open(pkl_path, 'rb') as f:
+            episode_results.append(pkl.load(f))
+    return episode_results
+
+
 def _perform_multiple_episodes(
-        summary_dir, dataset, device, config, is_mp):
+        summary_dir, dataset, device, config, is_mp, sequential_episodes=False):
     episode_results = []
     def _gen_episodes():
         for episode_index in range(config.n_episodes):
@@ -612,7 +889,10 @@ def _perform_multiple_episodes(
                 config] #config
 
     episode_results = None
-    if(is_mp):
+    if device.type == 'mps' and config.n_episodes > 1 and not sequential_episodes:
+        episode_results = _perform_multiple_episodes_subprocess(
+            summary_dir, dataset, device, config)
+    elif is_mp:
         n_workers = config.n_episodes
         with mp.Pool(n_workers) as mppool:
             result = mppool.starmap_async(
@@ -649,7 +929,7 @@ class ExperimentConfiguration:
     opt_factory : callable = None  # opt_factory(model) -> optimizer; overrides optim_class/optim_args
 
 def run_configurations(summary_dir, conf_list, dataset, device=None, is_mp=True,
-                       parallel_configs=False, tpr_summary=None):
+                       parallel_configs=False, tpr_summary=None, sequential_episodes=False):
     if device is None:
         device = get_device()
     if device.type == 'mps' and is_mp:
@@ -661,7 +941,7 @@ def run_configurations(summary_dir, conf_list, dataset, device=None, is_mp=True,
         n_workers = min(len(conf_list), os.cpu_count() or 1)
         logging.info(f'Running {len(conf_list)} configs across {n_workers} workers')
         args = [
-            (joinmakedir(summary_dir, c.name), dataset, device, c, False)
+            (joinmakedir(summary_dir, c.name), dataset, device, c, False, sequential_episodes)
             for c in conf_list
         ]
         with mp.Pool(n_workers) as pool:
@@ -673,7 +953,8 @@ def run_configurations(summary_dir, conf_list, dataset, device=None, is_mp=True,
         conf_res = [
             _perform_multiple_episodes(
                 summary_dir=joinmakedir(summary_dir, c.name),
-                dataset=dataset, device=device, config=c, is_mp=is_mp)
+                dataset=dataset, device=device, config=c, is_mp=is_mp,
+                sequential_episodes=sequential_episodes)
             for c in conf_list
         ]
 

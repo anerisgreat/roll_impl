@@ -23,6 +23,10 @@ rsync -avz --ignore-existing \
 
 rsync -avz --ignore-existing \
     -e "ssh $SSH_OPTS" \
+    "$REMOTE:$REMOTE_DIR/results-final/" "$LOCAL_DIR/results-final/" 2>/dev/null || true
+
+rsync -avz --ignore-existing \
+    -e "ssh $SSH_OPTS" \
     "$REMOTE:$REMOTE_DIR/poison/" "$LOCAL_DIR/poison/" 2>/dev/null || true
 
-echo "==> Done. Results in: $LOCAL_DIR/results/"
+echo "==> Done. Results in: $LOCAL_DIR/results/ and $LOCAL_DIR/results-final/"

@@ -19,33 +19,11 @@ from src.experiment import run_configurations, basic_data_splitter, \
 from src.datasets import ImbalancedCifar10Dataset
 from src.utils import init_experiment
 from src.roll import kernelized_roll_aoc, mae_loss, gce_loss, libauc_auc_loss
+from src.networks import ConvNet
 
 MAX_ITERS_ROLL = 1500
 MAX_ITERS_BASE = 5000
 N_EPISODES = 3
-
-
-class ConvNet(nn.Module):
-    def __init__(self):
-        super().__init__()
-        block = lambda c_in, c_out: [
-            nn.Conv2d(c_in, c_out, 3, padding=1),
-            nn.BatchNorm2d(c_out),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-        ]
-        self._layers = nn.Sequential(
-            *block(3, 32),
-            *block(32, 64),
-            *block(64, 64),
-            nn.Flatten(),
-            nn.Linear(64 * 4 * 4, 128),
-            nn.ReLU(),
-            nn.Linear(128, 1),
-        )
-
-    def forward(self, x):
-        return self._layers(x).squeeze(1)
 
 
 def make_configs(net_creator, data_splitter, imbalance_ratio, n_episodes):
@@ -82,7 +60,7 @@ def make_configs(net_creator, data_splitter, imbalance_ratio, n_episodes):
         name='libauc-auroc',
         model_creator_func=net_creator,
         data_splitter=data_splitter,
-        opt_factory=loss_fn.pesg_opt_factory(lr=0.1),
+        opt_factory=loss_fn.pesg_opt_factory(lr=1e-3),
         criteriorator=BasicCriteriorator(loss_fn, MAX_ITERS_BASE,
             patience=500, grace_period=50),
         lr_scheduler_class=None,
@@ -92,8 +70,8 @@ def make_configs(net_creator, data_splitter, imbalance_ratio, n_episodes):
         roll_config('roll-aoc', kernelized_roll_aoc()),
         base_config('bce-weighted',
             nn.BCEWithLogitsLoss(pos_weight=torch.tensor([imbalance_ratio]))),
-        base_config('mae', mae_loss),
-        base_config('gce-0.7', gce_loss(q=0.7)),
+        base_config('mae', mae_loss(pos_weight=imbalance_ratio)),
+        base_config('gce-0.7', gce_loss(q=0.7, pos_weight=imbalance_ratio)),
         libauc_cfg,
     ]
 
@@ -113,4 +91,6 @@ if __name__ == '__main__':
         print(f'IR={ir}: {n_pos} pos / {n_neg} neg  (actual {actual_ir:.1f})')
 
         configs = make_configs(net_creator, splitter, actual_ir, N_EPISODES)
-        run_configurations(run_dir, configs, dataset, is_mp=False)
+        run_configurations(run_dir, configs[:-1], dataset, is_mp=False)
+        run_configurations(run_dir, configs[-1:], dataset,
+                           device=torch.device('cpu'), is_mp=False)

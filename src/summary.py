@@ -111,25 +111,6 @@ def summarize_split_roll_cdf(summary_dir, ep_res, config):
 
 
 def summarize_episode(summary_dir, ep_res, config):
-    criteria_dir = joinmakedir(summary_dir, 'criteria')
-    #Summarize criteria
-    for split, split_epochs in ep_res.split_criteria_epochs.items():
-        fig = go.Figure()
-        for c in split_epochs.columns:
-            fig.add_traces(go.Scatter(
-                x = split_epochs.index,
-                y = split_epochs[c],
-                mode = 'lines',
-                name = c,
-                legendgroup = c
-            ))
-        fig.update_layout(showlegend = True)
-        fig.write_html(os.path.join(criteria_dir, f'{split}.html'))
-
-    #Summarize split stuff
-    summarize_split_roll_cdf(summary_dir, ep_res, config)
-
-    #Summarize scores
     for split, result in ep_res.split_results.items():
         with open(os.path.join(summary_dir, f'{split}-res.pkl'), 'wb') as ofile:
             pickle.dump(ep_res, ofile)
@@ -274,58 +255,7 @@ _color_str_change_opacity= lambda s, a: \
 
 def _gen_roc_to_file(fname, multi_ep_results, names,
                     disabled_modes = ['Train']):
-    color_palette = plotly.colors.qualitative.Dark24
-    color_iter = iter(color_palette)
-    fig = go.Figure()
-    for ep_results, name in zip(multi_ep_results, names):
-        rocs = _get_roc_curves_from_episode(ep_results)
-        base_color = _color_str_to_rgb_str(next(color_iter))
-        colors = [
-            base_color, \
-            _color_str_change_brightness(base_color, 0.3),
-            _color_str_change_brightness(base_color, -0.3)]
-        colors_iter = iter(colors)
-        for res_name, roc in rocs.items():
-            c = next(colors_iter)
-            roc_name = f'{name}-{res_name}'
-            fig.add_trace(go.Scatter(
-                x = roc.fpr,
-                y = roc.tpr_mean,
-                mode = 'lines',
-                name = roc_name,
-                legendgroup = roc_name,
-                line = dict(color = c)))
-            fig.add_trace(
-                go.Scatter(
-                    x = np.concatenate((roc.fpr, roc.fpr[::-1])),
-                    y = np.concatenate((roc.tpr_75, roc.tpr_25[::-1])),
-                    fill = 'toself',
-                    fillcolor = _color_str_change_opacity(c, 0.1),
-                    mode = 'lines',
-                    line = dict(color = 'rgba(0,0,0,0)'),
-                    hoverinfo = 'skip',
-                    legendgroup = roc_name,
-                    showlegend = False))
-            fig.add_trace(
-                go.Scatter(
-                    x = np.concatenate((roc.fpr, roc.fpr[::-1])),
-                    y = np.concatenate((roc.tpr_max, roc.tpr_min[::-1])),
-                    fill = 'toself',
-                    fillcolor = _color_str_change_opacity(c, 0.1),
-                    mode = 'lines',
-                    line = dict(color = 'rgba(0,0,0,0)'),
-                    hoverinfo = 'skip',
-                    legendgroup = roc_name,
-                    showlegend = False))
-
-        fig.update_layout(showlegend = True)
-        fig.update_traces(
-            visible = 'legendonly',
-            selector = lambda x: \
-                any((not x.name is None and d.lower() in x.name.lower()) or \
-                (not x.legendgroup is None and d.lower() in x.legendgroup.lower()) \
-                for d in disabled_modes))
-        fig.write_html(fname)
+    pass
 
 def summarize_all_episodes(summary_dir, episode_results, config):
     #train, val, test
@@ -347,6 +277,11 @@ def write_auc_csv(summary_dir, multi_ep_results, configs):
             rows.append({'config': config.name, 'episode': ep_idx, 'test_auc': auc})
     df = pd.DataFrame(rows)
     path = os.path.join(summary_dir, 'auc.csv')
+    if os.path.exists(path):
+        existing = pd.read_csv(path)
+        existing_keys = set(zip(existing['config'], existing['episode']))
+        df = df[~df.apply(lambda r: (r['config'], r['episode']) in existing_keys, axis=1)]
+        df = pd.concat([existing, df], ignore_index=True)
     df.to_csv(path, index=False)
     logging.info(f'AUC summary written to {path}')
 

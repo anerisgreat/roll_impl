@@ -51,7 +51,7 @@ def logging_get_default_config(
              "formatter" : "debug",
              "filename" : debug_fname,
              "level" : logging.DEBUG}
-        return base_dict
+    return base_dict
 
 def get_device():
     if torch.cuda.is_available():
@@ -73,7 +73,6 @@ def init_experiment(base_dir, experiment_name, console_level = logging.INFO):
         datetime.datetime.now().strftime('%Y-%m-%d-%H-%M'))
 
     loggingconfig.dictConfig(logging_get_default_config(
-        debug_fname = os.path.join(run_dir, 'debug.log'),
         console_level = console_level))
     #INIT LOG
     return run_dir

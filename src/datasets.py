@@ -259,6 +259,105 @@ class ImbalancedCifar10Dataset:
         return len(self.x)
 
 
+class Animal10NDataset:
+    """ANIMAL-10N: 50K training images of 10 visually similar animal classes
+    with ~8% human annotation noise (Song et al., ICLR 2020 / SELFIE paper).
+
+    Download: https://nihalsid.github.io/animal-10n/
+    Extract to ~/.data/animal10n/ so that ~/.data/animal10n/train/ and
+    ~/.data/animal10n/test/ exist, each with one subdirectory per class.
+
+    Classes (0-indexed alphabetically by ImageFolder): cat, cheetah, chimpanzee,
+    coyote, guinea_pig, hamster, jaguar, lynx, orangutan, wolf.
+
+    Default positive_class=0 (cat) gives IR ~9 — same as CIFAR-10N setup.
+
+    Images are 64×64 RGB. The ConvNet linear layer must be adjusted vs CIFAR-10:
+    three 2×2 max-pools reduce 64→8, so flatten gives 64*8*8=4096 (not 1024).
+    """
+
+    def __init__(self, split='train', positive_class=0):
+        data_dir = os.path.expanduser('~/.data/animal10n')
+        split_dir = os.path.join(data_dir, split)
+        if not os.path.isdir(split_dir):
+            raise FileNotFoundError(
+                f"ANIMAL-10N {split} split not found at {split_dir}.\n"
+                "  Download from: https://nihalsid.github.io/animal-10n/\n"
+                "  Extract to ~/.data/animal10n/ so that train/ and test/ subdirs exist."
+            )
+
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        ])
+        self._dset = torchvision.datasets.ImageFolder(split_dir, transform=transform)
+        targets = torch.tensor(self._dset.targets)
+        self.y = (targets == positive_class).float()
+
+    def __getitem__(self, i):
+        if torch.is_tensor(i) and i.dim() > 0:
+            xs = torch.stack([self._dset[int(idx)][0] for idx in i])
+            return xs, self.y[i]
+        x, _ = self._dset[int(i)]
+        return x, self.y[i]
+
+    def __len__(self):
+        return len(self._dset)
+
+
+class Food101NDataset:
+    """Food-101N: ~310K web-crawled food images with ~18.4% label noise.
+    (Kuang-Huai Lee et al., CVPR 2018)
+
+    Download via Kaggle: kaggle datasets download kuanghueilee/food-101n -p ~/.data/food-101n --unzip
+    Expects: ~/.data/food-101n/Food-101N_release/images/<class>/<image>.jpg
+
+    Images are resized to 64×64 RGB and preloaded into RAM as uint8 (~3.5 GB) to
+    avoid per-epoch disk I/O. Normalization to [-1, 1] is applied on access.
+    Default positive_class=0 (alphabetically first class, apple_pie) gives IR ~100:1.
+    """
+
+    def __init__(self, positive_class=0):
+        import concurrent.futures
+        from PIL import Image as PILImage
+
+        images_dir = os.path.expanduser('~/.data/food-101n/Food-101N_release/images')
+        if not os.path.isdir(images_dir):
+            raise FileNotFoundError(
+                f"Food-101N images not found at {images_dir}.\n"
+                "  Download: kaggle datasets download kuanghueilee/food-101n -p ~/.data/food-101n --unzip"
+            )
+
+        index_dset = torchvision.datasets.ImageFolder(images_dir)
+        targets = torch.tensor(index_dset.targets)
+        self.y = (targets == positive_class).float()
+
+        n = len(index_dset)
+        print(f'Preloading {n} Food-101N images into RAM...', flush=True)
+
+        # Pre-allocate the final tensor so we never hold two full copies simultaneously.
+        # Each thread writes to a unique index — no overlap, so this is safe.
+        self._images = torch.empty(n, 3, 64, 64, dtype=torch.uint8)
+        paths = [s[0] for s in index_dset.samples]
+
+        def _load_into(args):
+            i, path = args
+            img = PILImage.open(path).convert('RGB').resize((64, 64))
+            self._images[i] = transforms.ToTensor()(img).mul(255).byte()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:
+            list(ex.map(_load_into, enumerate(paths)))
+
+        print(f'Preload complete. RAM used: {self._images.nbytes / 1e9:.2f} GB', flush=True)
+
+    def __getitem__(self, i):
+        x = self._images[i].float().div(127.5).sub(1.0)
+        return x, self.y[i]
+
+    def __len__(self):
+        return len(self._images)
+
+
 class BankMarketingDataset:
     def __init__(self):
         data_dir = os.getenv('uci_bank_additional_dir')
@@ -352,6 +451,40 @@ class CreditCardFraudDataset:
 
         self.x = x
         self.y = torch.tensor(y, dtype=torch.float32)
+
+    def __getitem__(self, i):
+        return self.x[i], self.y[i]
+
+    def __len__(self):
+        return len(self.x)
+
+
+class ChestXray14EmbeddingDataset:
+    """NIH ChestX-ray14 pre-extracted DenseNet-121 embeddings (1024-dim).
+
+    Requires running scripts/extract_chestxray14_features.py first to produce
+    ~/datasets/chestxray14/features.npz.
+
+    Labels are the pipe-separated Finding Labels from Data_Entry_2017.csv.
+    positive_class: pathology name to treat as positive (default 'Effusion', IR ~7.5:1).
+    """
+
+    def __init__(self, positive_class='Effusion'):
+        npz_path = os.path.expanduser('~/datasets/chestxray14/features.npz')
+        if not os.path.exists(npz_path):
+            raise FileNotFoundError(
+                f"ChestX-ray14 embeddings not found at {npz_path}.\n"
+                "  Run: nix develop --command python scripts/extract_chestxray14_features.py"
+            )
+        data = np.load(npz_path, allow_pickle=True)
+        features = data['features'].astype(np.float32)   # (N, 1024)
+        labels_str = data['labels']                       # (N,) pipe-separated strings
+
+        is_positive = np.array([positive_class in lbl for lbl in labels_str], dtype=np.float32)
+
+        self.x = TorchStandardScaler().fit_transform(
+            torch.tensor(features, dtype=torch.float32))
+        self.y = torch.tensor(is_positive, dtype=torch.float32)
 
     def __getitem__(self, i):
         return self.x[i], self.y[i]

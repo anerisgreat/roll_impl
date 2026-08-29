@@ -1,13 +1,16 @@
 """
-UCI Bank Marketing: full baseline suite on term-deposit subscription prediction.
-(roll-aoc, roll-tpr90, bce-weighted, mae, gce-0.7, focal-loss, asymmetric-loss, libauc-auroc)
+NIH ChestX-ray14: binary classification using frozen DenseNet-121 embeddings.
+(Cohen et al. 2022, TorchXRayVision — pretrained on NIH ChestX-ray14)
 
-~41K samples, ~48 features after one-hot encoding, IR ~8:1 (~11.3% positive).
+Labels extracted from radiological reports via NLP → ~20% noise.
+Binary task: Effusion vs rest (positive_class='Effusion', IR ~7.5:1, ~12% prevalence).
 
-Network: 128→128→1 MLP (2 hidden layers, ReLU, Dropout 0.3) — standard for this
-dataset per ktamburi/Bank-Marketing-UCI-Dataset-Neural-Network and arXiv:2407.00956.
+Input: 1024-dim DenseNet-121 feature vectors (pre-extracted, ~112K samples).
+Network: 1024→512→128→1 MLP with dropout — treats embeddings as tabular features.
+Requires: scripts/extract_chestxray14_features.py run once beforehand.
 
-libauc-auroc runs on CPU (LibAUC does not support MPS).
+Run:
+  nix develop --command python experiments/other/experiment-chestxray14.py
 """
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -17,9 +20,9 @@ import torch
 from torch import nn
 from functools import partial
 
-from src.experiment import run_configurations, basic_data_splitter, \
-    BasicCriteriorator, ExperimentConfiguration, KernelScheduler, make_shuffled_splitter
-from src.datasets import BankMarketingDataset
+from src.experiment import run_configurations, BasicCriteriorator, \
+    ExperimentConfiguration, KernelScheduler, make_shuffled_splitter
+from src.datasets import ChestXray14EmbeddingDataset
 from src.roll import kernelized_roll_aoc, kernelized_roll_tpr, mae_loss, gce_loss, \
     libauc_auc_loss, focal_loss, asymmetric_loss
 
@@ -32,11 +35,11 @@ LR_SCHEDULER_ARGS = {'step_size': 50, 'gamma': 0.5}
 
 
 class Net(nn.Module):
-    def __init__(self, input_dim):
+    def __init__(self):
         super().__init__()
         self._layers = nn.Sequential(
-            nn.Linear(input_dim, 128), nn.ReLU(), nn.Dropout(0.3),
-            nn.Linear(128, 128),       nn.ReLU(), nn.Dropout(0.3),
+            nn.Linear(1024, 512), nn.ReLU(), nn.Dropout(0.3),
+            nn.Linear(512, 128),  nn.ReLU(), nn.Dropout(0.3),
             nn.Linear(128, 1)
         )
 
@@ -50,17 +53,17 @@ if __name__ == '__main__':
                         datefmt='%H:%M:%S')
 
     run_dir = os.path.normpath(os.path.join(
-        os.path.dirname(__file__), '..', '..', 'results-final', 'bank-marketing'))
+        os.path.dirname(__file__), '..', '..', 'results-final', 'chestxray14'))
     os.makedirs(run_dir, exist_ok=True)
 
-    dataset = BankMarketingDataset()
+    dataset = ChestXray14EmbeddingDataset(positive_class='Effusion')
     n_pos = int(dataset.y.sum().item())
     n_neg = int((1 - dataset.y).sum().item())
     imbalance_ratio = n_neg / max(n_pos, 1)
     imratio = n_pos / len(dataset)
-    print(f'bank-marketing: {n_pos} pos / {n_neg} neg  (IR {imbalance_ratio:.1f})')
+    print(f'chestxray14 (Effusion): {n_pos} pos / {n_neg} neg  (IR {imbalance_ratio:.1f})')
 
-    make_net = partial(Net, dataset.x.shape[1])
+    make_net = Net
 
     def roll_config(name, loss_func):
         return ExperimentConfiguration(
@@ -94,14 +97,14 @@ if __name__ == '__main__':
         name='libauc-auroc',
         model_creator_func=make_net,
         data_splitter=make_shuffled_splitter(batch_size=256, is_balanced=True),
-        opt_factory=loss_fn.pesg_opt_factory(lr=0.01),
+        opt_factory=loss_fn.pesg_opt_factory(lr=1e-4),
         criteriorator=BasicCriteriorator(loss_fn, MAX_ITERS_BASE,
             patience=500, grace_period=50),
         lr_scheduler_class=LR_SCHEDULER,
         lr_scheduler_args=LR_SCHEDULER_ARGS,
         n_episodes=N_EPISODES)
 
-    mps_configs = [
+    main_configs = [
         roll_config('roll-aoc',  kernelized_roll_aoc()),
         roll_config('roll-tpr90', kernelized_roll_tpr(tpr=0.9)),
         base_config('bce-weighted',
@@ -112,7 +115,7 @@ if __name__ == '__main__':
         base_config('asymmetric-loss', asymmetric_loss(pos_weight=imbalance_ratio)),
     ]
 
-    run_configurations(run_dir, mps_configs, dataset,
+    run_configurations(run_dir, main_configs, dataset,
                        is_mp=False, sequential_episodes=True)
     run_configurations(run_dir, [libauc_cfg], dataset,
                        device=torch.device('cpu'), is_mp=False, sequential_episodes=True)

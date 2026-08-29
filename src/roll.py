@@ -195,10 +195,10 @@ class KernelizedROLLoss(Function):
             v = v.clamp(max=10000.) if isinstance(v, torch.Tensor) else 10000.
 
         K = len(alphas)
-        alphas_t = torch.tensor(alphas, dtype=scores.dtype)   # (K,)
+        alphas_t = torch.tensor(alphas, dtype=scores.dtype, device=scores.device)   # (K,)
         margin = 10.0 / float(v)
-        lo = torch.full((K,), float(scores.min()) - margin)
-        hi = torch.full((K,), float(scores.max()) + margin)
+        lo = torch.full((K,), float(scores.min()) - margin, device=scores.device)
+        hi = torch.full((K,), float(scores.max()) + margin, device=scores.device)
         mid = (lo + hi) / 2
 
         for _ in range(max_iters):
@@ -356,9 +356,11 @@ class _PESGFactory:
 
     def __call__(self, model):
         from libauc.optimizers import PESG
+        device = next(model.parameters()).device
         return PESG(model.parameters(), self.loss_module, lr=self.lr,
                     weight_decay=self.weight_decay, epoch_decay=self.epoch_decay,
-                    momentum=self.momentum, mode=self.mode, verbose=False)
+                    momentum=self.momentum, mode=self.mode, verbose=False,
+                    device=device)
 
 
 class libauc_auc_loss:
@@ -386,14 +388,26 @@ class libauc_auc_loss:
 
 # ── Robust loss functions (noise-tolerant baselines) ──────────────────────────
 
-def mae_loss(yh, y):
+class mae_loss:
     """Mean Absolute Error loss on sigmoid outputs.
 
     Satisfies the symmetry condition (Ghosh 2017): provably noise-tolerant
     under class-conditional label noise.
+    pos_weight: weight applied to positive-class samples (same convention as
+    BCEWithLogitsLoss pos_weight). Set to n_neg/n_pos for imbalanced datasets.
     """
-    p = torch.sigmoid(yh)
-    return torch.mean(torch.abs(y.float() - p))
+    def __init__(self, pos_weight: float = 1.0):
+        self.pos_weight = pos_weight
+
+    def __call__(self, yh, y):
+        p = torch.sigmoid(yh)
+        loss = torch.abs(y.float() - p)
+        if self.pos_weight != 1.0:
+            w = torch.where(y.bool(),
+                            torch.full_like(loss, self.pos_weight),
+                            torch.ones_like(loss))
+            return (w * loss).mean()
+        return loss.mean()
 
 
 class gce_loss:
@@ -401,13 +415,82 @@ class gce_loss:
 
     L_q interpolates between MAE (q→0, noise-robust) and CE (q→1, fast).
     q=0.7 is the value recommended in the original paper.
-    Implemented as a picklable class so it works with multiprocessing.
+    pos_weight: weight applied to positive-class samples for class imbalance.
     """
-    def __init__(self, q: float = 0.7):
+    def __init__(self, q: float = 0.7, pos_weight: float = 1.0):
         self.q = q
+        self.pos_weight = pos_weight
 
     def __call__(self, yh, y):
         p = torch.sigmoid(yh)
         p_true = p * y.float() + (1.0 - p) * (1.0 - y.float())
         p_true = p_true.clamp(min=1e-7)
-        return torch.mean((1.0 - p_true.pow(self.q)) / self.q)
+        loss = (1.0 - p_true.pow(self.q)) / self.q
+        if self.pos_weight != 1.0:
+            w = torch.where(y.bool(),
+                            torch.full_like(loss, self.pos_weight),
+                            torch.ones_like(loss))
+            return (w * loss).mean()
+        return loss.mean()
+
+
+class focal_loss:
+    """Binary focal loss (Lin et al., ICCV 2017).
+
+    Applies a modulating factor (1-p_t)^gamma to down-weight easy examples,
+    focusing training on hard / misclassified samples. gamma=2 is the standard.
+    pos_weight: alpha class-balancing weight for positive samples (alpha in the
+    original paper). Set to n_neg/n_pos for imbalanced datasets.
+    """
+    def __init__(self, gamma: float = 2.0, pos_weight: float = 1.0):
+        self.gamma = gamma
+        self.pos_weight = pos_weight
+
+    def __call__(self, yh, y):
+        import torch.nn.functional as F
+        p = torch.sigmoid(yh)
+        bce = F.binary_cross_entropy_with_logits(yh, y.float(), reduction='none')
+        p_t = p * y.float() + (1.0 - p) * (1.0 - y.float())
+        loss = (1.0 - p_t) ** self.gamma * bce
+        if self.pos_weight != 1.0:
+            w = torch.where(y.bool(),
+                            torch.full_like(loss, self.pos_weight),
+                            torch.ones_like(loss))
+            return (w * loss).mean()
+        return loss.mean()
+
+
+class asymmetric_loss:
+    """Binary asymmetric loss (Ridnik et al., ICCV 2021).
+
+    Applies different focal strengths to positive (gamma_pos) and negative
+    (gamma_neg) samples, plus a probability clip that zeroes the gradient for
+    negative samples whose predicted positive probability is below `clip`.
+    This suppresses high-confidence positive predictions with noisy negative
+    labels — suited to one-sided class-conditional label noise.
+    Default params: gamma_pos=0, gamma_neg=4, clip=0.05 (from the paper).
+    pos_weight: class-balancing weight for positive samples.
+    """
+    def __init__(self, gamma_pos: float = 0.0, gamma_neg: float = 4.0,
+                 clip: float = 0.05, pos_weight: float = 1.0):
+        self.gamma_pos = gamma_pos
+        self.gamma_neg = gamma_neg
+        self.clip = clip
+        self.pos_weight = pos_weight
+
+    def __call__(self, yh, y):
+        p = torch.sigmoid(yh)
+        y = y.float()
+
+        # shift negative probability down; samples with p < clip contribute zero loss
+        p_neg = torch.clamp(p - self.clip, min=0.0)
+
+        loss_pos = -y * torch.log(p.clamp(min=1e-8)) * (1.0 - p) ** self.gamma_pos
+        loss_neg = -(1.0 - y) * torch.log((1.0 - p_neg).clamp(min=1e-8)) * p_neg ** self.gamma_neg
+        loss = loss_pos + loss_neg
+        if self.pos_weight != 1.0:
+            w = torch.where(y.bool(),
+                            torch.full_like(loss, self.pos_weight),
+                            torch.ones_like(loss))
+            return (w * loss).mean()
+        return loss.mean()

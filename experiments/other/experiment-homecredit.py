@@ -1,13 +1,17 @@
 """
-UCI Bank Marketing: full baseline suite on term-deposit subscription prediction.
-(roll-aoc, roll-tpr90, bce-weighted, mae, gce-0.7, focal-loss, asymmetric-loss, libauc-auroc)
+Home Credit Default Risk: binary classification on loan application data.
+(Kaggle competition: home-credit-default-risk)
 
-~41K samples, ~48 features after one-hot encoding, IR ~8:1 (~11.3% positive).
+~307K applications, ~106 numeric features, IR ~11:1 (~8% default rate).
+Label noise: self-reported income, document flags, and derived ratios from
+credit bureaus introduce real-world annotation noise.
 
-Network: 128→128→1 MLP (2 hidden layers, ReLU, Dropout 0.3) — standard for this
-dataset per ktamburi/Bank-Marketing-UCI-Dataset-Neural-Network and arXiv:2407.00956.
-
+Network: 256→128→1 MLP (2 hidden layers, ReLU, Dropout 0.3).
 libauc-auroc runs on CPU (LibAUC does not support MPS).
+
+Download:
+  kaggle competitions download -c home-credit-default-risk -f application_train.csv \
+    -p ~/.data/homecredit --unzip
 """
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -17,9 +21,9 @@ import torch
 from torch import nn
 from functools import partial
 
-from src.experiment import run_configurations, basic_data_splitter, \
-    BasicCriteriorator, ExperimentConfiguration, KernelScheduler, make_shuffled_splitter
-from src.datasets import BankMarketingDataset
+from src.experiment import run_configurations, BasicCriteriorator, \
+    ExperimentConfiguration, KernelScheduler, make_shuffled_splitter
+from src.datasets import HomeCreditDataset
 from src.roll import kernelized_roll_aoc, kernelized_roll_tpr, mae_loss, gce_loss, \
     libauc_auc_loss, focal_loss, asymmetric_loss
 
@@ -35,8 +39,8 @@ class Net(nn.Module):
     def __init__(self, input_dim):
         super().__init__()
         self._layers = nn.Sequential(
-            nn.Linear(input_dim, 128), nn.ReLU(), nn.Dropout(0.3),
-            nn.Linear(128, 128),       nn.ReLU(), nn.Dropout(0.3),
+            nn.Linear(input_dim, 256), nn.ReLU(), nn.Dropout(0.3),
+            nn.Linear(256, 128),       nn.ReLU(), nn.Dropout(0.3),
             nn.Linear(128, 1)
         )
 
@@ -50,15 +54,15 @@ if __name__ == '__main__':
                         datefmt='%H:%M:%S')
 
     run_dir = os.path.normpath(os.path.join(
-        os.path.dirname(__file__), '..', '..', 'results-final', 'bank-marketing'))
+        os.path.dirname(__file__), '..', '..', 'results-final', 'homecredit'))
     os.makedirs(run_dir, exist_ok=True)
 
-    dataset = BankMarketingDataset()
+    dataset = HomeCreditDataset()
     n_pos = int(dataset.y.sum().item())
     n_neg = int((1 - dataset.y).sum().item())
     imbalance_ratio = n_neg / max(n_pos, 1)
     imratio = n_pos / len(dataset)
-    print(f'bank-marketing: {n_pos} pos / {n_neg} neg  (IR {imbalance_ratio:.1f})')
+    print(f'home-credit: {n_pos} pos / {n_neg} neg  (IR {imbalance_ratio:.1f})')
 
     make_net = partial(Net, dataset.x.shape[1])
 

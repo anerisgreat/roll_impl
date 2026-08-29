@@ -1,11 +1,11 @@
 """
-CIFAR-10N: baseline suite across noise conditions.
+ANIMAL-10N: baseline suite on human-annotated noisy labels.
 (roll-aoc, bce-weighted, mae, gce-0.7, libauc-auroc, focal-loss, asymmetric-loss)
 
-noise_type: clean | aggre | worse
-Positive class: class 1 (automobile) vs rest — natural IR ~9.
+~55K training images, 64×64 RGB, ~8% human annotation noise.
+Positive class: class 0 (cat) vs rest — natural IR ~9.
 
-Reference: UCSC-REAL/cifar-10-100n — the standard noisy-label benchmark.
+Reference: Song et al., SELFIE, ICLR 2020.
 """
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -16,7 +16,7 @@ from functools import partial
 
 from src.experiment import run_configurations, basic_data_splitter, \
     BasicCriteriorator, ExperimentConfiguration, KernelScheduler
-from src.datasets import Cifar10NDataset
+from src.datasets import Animal10NDataset
 from src.utils import init_experiment
 from src.roll import kernelized_roll_aoc, mae_loss, gce_loss, libauc_auc_loss, \
     focal_loss, asymmetric_loss
@@ -26,16 +26,16 @@ MAX_ITERS_ROLL = 1500
 MAX_ITERS_BASE = 5000
 N_EPISODES     = 3
 
-LR_SCHEDULER       = torch.optim.lr_scheduler.StepLR
-LR_SCHEDULER_ARGS  = {'step_size': 50, 'gamma': 0.5}
+LR_SCHEDULER      = torch.optim.lr_scheduler.StepLR
+LR_SCHEDULER_ARGS = {'step_size': 50, 'gamma': 0.5}
 
 
-def make_configs(net_creator, data_splitter, noise_type, imbalance_ratio, n_episodes):
+def make_configs(net_creator, data_splitter, imbalance_ratio, n_episodes):
     imratio = 1.0 / (1.0 + imbalance_ratio)
 
     def roll_config(name, loss_func):
         return ExperimentConfiguration(
-            name=f'{noise_type}-{name}',
+            name=name,
             model_creator_func=net_creator,
             data_splitter=data_splitter,
             optim_class=torch.optim.RMSprop,
@@ -49,7 +49,7 @@ def make_configs(net_creator, data_splitter, noise_type, imbalance_ratio, n_epis
 
     def base_config(name, loss_func):
         return ExperimentConfiguration(
-            name=f'{noise_type}-{name}',
+            name=name,
             model_creator_func=net_creator,
             data_splitter=data_splitter,
             optim_class=torch.optim.Adam,
@@ -62,7 +62,7 @@ def make_configs(net_creator, data_splitter, noise_type, imbalance_ratio, n_epis
 
     loss_fn = libauc_auc_loss(margin=1.0, imratio=imratio)
     libauc_cfg = ExperimentConfiguration(
-        name=f'{noise_type}-libauc-auroc',
+        name='libauc-auroc',
         model_creator_func=net_creator,
         data_splitter=data_splitter,
         opt_factory=loss_fn.pesg_opt_factory(lr=1e-3),
@@ -85,24 +85,23 @@ def make_configs(net_creator, data_splitter, noise_type, imbalance_ratio, n_epis
 
 
 if __name__ == '__main__':
-    run_dir = init_experiment('results', 'cifar10n')
+    run_dir = init_experiment('results', 'animal10n')
 
-    net_creator = ConvNet
+    net_creator = partial(ConvNet, image_size=64)
     splitter = partial(basic_data_splitter, batch_size=256, is_balanced=True)
 
-    for noise_type in ['clean', 'aggre', 'worse']:
-        dataset = Cifar10NDataset(noise_type=noise_type)
-        n_pos = int(dataset.y.sum().item())
-        n_neg = int((1 - dataset.y).sum().item())
-        imbalance_ratio = n_neg / max(n_pos, 1)
-        print(f'{noise_type}: {n_pos} pos / {n_neg} neg  (IR {imbalance_ratio:.1f})')
+    dataset = Animal10NDataset(split='train')
+    n_pos = int(dataset.y.sum().item())
+    n_neg = int((1 - dataset.y).sum().item())
+    imbalance_ratio = n_neg / max(n_pos, 1)
+    print(f'animal10n: {n_pos} pos / {n_neg} neg  (IR {imbalance_ratio:.1f})')
 
-        mps_configs, libauc_cfg = make_configs(
-            net_creator, splitter, noise_type, imbalance_ratio, N_EPISODES)
+    mps_configs, libauc_cfg = make_configs(
+        net_creator, splitter, imbalance_ratio, N_EPISODES)
 
-        # MPS configs: episodes run sequentially to avoid unified memory exhaustion
-        run_configurations(run_dir, mps_configs, dataset, is_mp=False, sequential_episodes=True)
+    # MPS configs: episodes run sequentially to avoid unified memory exhaustion
+    run_configurations(run_dir, mps_configs, dataset, is_mp=False, sequential_episodes=True)
 
-        # libauc-auroc: LibAUC does not support MPS — force CPU
-        run_configurations(run_dir, [libauc_cfg], dataset,
-                           device=torch.device('cpu'), is_mp=False)
+    # libauc-auroc: LibAUC does not support MPS — force CPU
+    run_configurations(run_dir, [libauc_cfg], dataset,
+                       device=torch.device('cpu'), is_mp=False)
